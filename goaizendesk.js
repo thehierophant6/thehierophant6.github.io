@@ -10,31 +10,19 @@
 (function() {
     'use strict';
 
-    // Para evitar que se abra repetidamente por el mismo número
     let ultimoValor = "";
 
-    // Localiza el campo por su id
-    const campoReferencia = document.getElementById('voice-field-field8');
-    if (!campoReferencia) return; // Si no existe, no hace nada
-
-    // Opción 1: usar "input" event para detectar cambios en tiempo real
-    campoReferencia.addEventListener('input', function() {
-        const valorActual = campoReferencia.value.trim();
-        // Si tiene valor y es distinto al último que abrimos, abrimos la URL
-        if (valorActual && valorActual !== ultimoValor) {
-            ultimoValor = valorActual;
-            window.open('https://okmobility.zendesk.com/agent/tickets/' + valorActual, '_blank');
-        }
-    });
-
-    // Opción 2 (alternativa): un setInterval que revisa el campo cada cierto tiempo
-    /*
+    // Revisamos cada X tiempo si el campo existe y si su valor cambió
     setInterval(() => {
-        const valorActual = campoReferencia.value.trim();
-        if (valorActual && valorActual !== ultimoValor) {
-            ultimoValor = valorActual;
-            window.open('https://okmobility.zendesk.com/agent/tickets/' + valorActual, '_blank');
+        const campoReferencia = document.getElementById('voice-field-field8');
+        if (campoReferencia) {
+            const valorActual = campoReferencia.value.trim();
+
+            // Sólo abrimos si el valor no está vacío y es distinto al último
+            if (valorActual && valorActual !== ultimoValor) {
+                ultimoValor = valorActual;
+                window.open(`https://okmobility.zendesk.com/agent/tickets/${valorActual}`, '_blank');
+            }
         }
-    }, 1000);
-    */
+    }, 1000); // cada 1 segundo
 })();
