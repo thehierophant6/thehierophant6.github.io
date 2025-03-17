@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      1.0
 // @description  Abre automáticamente el ticket de Zendesk al detectar número de referencia
-// @match        https://okmobility.gocontact.com/*
+// @include        https://okmobility.gocontact.com/*
 // @grant        none
 // ==/UserScript==
 
@@ -12,17 +12,26 @@
 
     let ultimoValor = "";
 
-    // Revisamos cada X tiempo si el campo existe y si su valor cambió
-    setInterval(() => {
+    // Observamos todo el body, a la espera de que se inserte el nodo con el id "voice-field-field8"
+    const observer = new MutationObserver(() => {
         const campoReferencia = document.getElementById('voice-field-field8');
         if (campoReferencia) {
-            const valorActual = campoReferencia.value.trim();
+            // Cuando lo encontremos, dejamos de observar (si queremos)
+            observer.disconnect();
 
-            // Sólo abrimos si el valor no está vacío y es distinto al último
-            if (valorActual && valorActual !== ultimoValor) {
-                ultimoValor = valorActual;
-                window.open(`https://okmobility.zendesk.com/agent/tickets/${valorActual}`, '_blank');
-            }
+            // Añadimos listener
+            campoReferencia.addEventListener('input', function() {
+                const valorActual = this.value.trim();
+                if (valorActual && valorActual !== ultimoValor) {
+                    ultimoValor = valorActual;
+                    window.open(`https://okmobility.zendesk.com/agent/tickets/${valorActual}`, '_blank');
+                }
+            });
         }
-    }, 1000); // cada 1 segundo
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
 })();
