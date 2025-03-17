@@ -1,37 +1,33 @@
 // ==UserScript==
-// @name         AutoOpenZendeskTicket
+// @name         AutoClickZendeskOpen
 // @namespace    http://tampermonkey.net/
 // @version      1.0
-// @description  Abre automáticamente el ticket de Zendesk al detectar número de referencia
-// @include        https://okmobility.gocontact.com/*
+// @description  Hace clic automáticamente en el botón "Open" de Zendesk
+// @match        https://okmobility.gocontact.com/*
 // @grant        none
 // ==/UserScript==
 
 (function() {
     'use strict';
 
-    let ultimoValor = "";
+    console.log("AutoClickZendeskOpen cargado...");
 
-    // Observamos todo el body, a la espera de que se inserte el nodo con el id "voice-field-field8"
-    const observer = new MutationObserver(() => {
-        const campoReferencia = document.getElementById('voice-field-field8');
-        if (campoReferencia) {
-            // Cuando lo encontremos, dejamos de observar (si queremos)
-            observer.disconnect();
+    let ultimoHref = "";
 
-            // Añadimos listener
-            campoReferencia.addEventListener('input', function() {
-                const valorActual = this.value.trim();
-                if (valorActual && valorActual !== ultimoValor) {
-                    ultimoValor = valorActual;
-                    window.open(`https://okmobility.zendesk.com/agent/tickets/${valorActual}`, '_blank');
-                }
-            });
+    // Cada 2s buscamos el enlace
+    setInterval(() => {
+        // Seleccionamos el <a> con clase .btn.btn-primary cuyo href apunte a tickets de Zendesk:
+        // Ajusta este selector si hay más botones .btn-primary en la página
+        const linkOpen = document.querySelector('a.btn.btn-primary[href*="okmobility.zendesk.com/agent/tickets/"]');
+
+        if (linkOpen) {
+            const hrefActual = linkOpen.getAttribute('href');
+            // Para no hacer click infinitamente en el mismo href, comprobamos si cambia
+            if (hrefActual && hrefActual !== ultimoHref) {
+                ultimoHref = hrefActual;
+                console.log("Clic automático en 'Open' =>", hrefActual);
+                linkOpen.click();
+            }
         }
-    });
-
-    observer.observe(document.body, {
-        childList: true,
-        subtree: true
-    });
+    }, 2000); // verifica cada 2 segundos
 })();
