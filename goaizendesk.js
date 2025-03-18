@@ -1,33 +1,47 @@
 // ==UserScript==
-// @name         AutoClickZendeskOpen
-// @namespace    http://tampermonkey.net/
+// @name         OKMobility - Abrir Zendesk por Referencia
+// @namespace    https://okmobility.gocontact.com/
 // @version      1.0
-// @description  Hace clic automáticamente en el botón "Open" de Zendesk
-// @match        https://okmobility.gocontact.com/*
+// @description  Abre automáticamente la URL de Zendesk con la referencia en otra pestaña cuando cambia el "Número referencia".
+// @author       TuNombre
+// @match        https://okmobility.gocontact.com/index.php#/voice*
 // @grant        none
 // ==/UserScript==
 
 (function() {
     'use strict';
 
-    console.log("AutoClickZendeskOpen cargado...");
+    // Variable para guardar la última referencia que abrimos
+    let ultimaReferencia = null;
 
-    let ultimoHref = "";
-
-    // Cada 2s buscamos el enlace
-    setInterval(() => {
-        // Seleccionamos el <a> con clase .btn.btn-primary cuyo href apunte a tickets de Zendesk:
-        // Ajusta este selector si hay más botones .btn-primary en la página
-        const linkOpen = document.querySelector('a.btn.btn-primary[href*="okmobility.zendesk.com/agent/tickets/"]');
-
-        if (linkOpen) {
-            const hrefActual = linkOpen.getAttribute('href');
-            // Para no hacer click infinitamente en el mismo href, comprobamos si cambia
-            if (hrefActual && hrefActual !== ultimoHref) {
-                ultimoHref = hrefActual;
-                console.log("Clic automático en 'Open' =>", hrefActual);
-                linkOpen.click();
-            }
+    // Función que abrirá la URL en otra pestaña si la referencia es distinta
+    function abrirZendeskSiCambia(nuevaRef) {
+        if (nuevaRef && nuevaRef !== ultimaReferencia) {
+            ultimaReferencia = nuevaRef;
+            const url = `https://okmobility.zendesk.com/agent/tickets/${nuevaRef}`;
+            window.open(url, '_blank');
         }
-    }, 2000); // verifica cada 2 segundos
+    }
+
+    // Observamos cambios en el DOM, por si el campo con id="voice-field-field8" tarda en cargar o cambia dinámicamente
+    const observer = new MutationObserver(() => {
+        const inputReferencia = document.querySelector('#voice-field-field8');
+        if (inputReferencia) {
+            // En cuanto lo encontremos, dejamos de observar el DOM para evitar sobrecarga
+            observer.disconnect();
+
+            // Cada vez que el usuario cambie el valor (o sea cambiado dinámicamente), abrimos la URL
+            inputReferencia.addEventListener('input', () => {
+                const valorActual = inputReferencia.value.trim();
+                abrirZendeskSiCambia(valorActual);
+            });
+
+            // Por si ya hay un valor cargado desde el principio
+            const valorInicial = inputReferencia.value.trim();
+            abrirZendeskSiCambia(valorInicial);
+        }
+    });
+
+    // Iniciamos el observer en el body
+    observer.observe(document.body, { childList: true, subtree: true });
 })();
