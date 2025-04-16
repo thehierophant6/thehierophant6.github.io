@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Zendesk - Bloqueo de correos prohibidos (TO, CC, BCC)
+// @name         Zendesk - Bloqueo de correos prohibidos (versión robusta TO + CC)
 // @namespace    http://tampermonkey.net/
-// @version      1.2
-// @description  Evita enviar tickets a direcciones bloqueadas desde Zendesk, incluyendo TO, CC y BCC
+// @version      1.3
+// @description  Bloquea el envío en Zendesk si se detectan correos prohibidos en destinatarios (TO, CC, BCC visuales tipo chip/badge)
 // @author       Carlos
 // @match        https://*.zendesk.com/*
 // @grant        none
@@ -13,80 +13,67 @@
 
     const correosBloqueados = [
         "carlosjsp94@gmail.com",
-        "ejemplo@prohibido.com",
-        "test@noenviar.com"
+        "test@prohibido.com"
     ];
 
-    function normalizar(correo) {
+    function normalizarCorreo(correo) {
         return correo.trim().toLowerCase();
     }
 
-    function obtenerCamposCorreo() {
-        const campos = [];
+    function obtenerCorreosVisibles() {
+        const chips = document.querySelectorAll('[data-test-id^="composer:recipient-pill"]'); // TO, CC, BCC pills
+        const correosDetectados = [];
 
-        // TO
-        const to = document.querySelector('[data-test-id="composer:recipient-email"] input');
-        if (to) campos.push(to);
+        chips.forEach(chip => {
+            const texto = chip.textContent;
+            if (texto && texto.includes("<") && texto.includes(">")) {
+                const match = texto.match(/<(.*?)>/);
+                if (match && match[1]) {
+                    correosDetectados.push(normalizarCorreo(match[1]));
+                }
+            }
+        });
 
-        // CC y BCC
-        const ccInputs = document.querySelectorAll('[data-test-id="composer:cc"] input');
-        const bccInputs = document.querySelectorAll('[data-test-id="composer:bcc"] input');
-
-        ccInputs.forEach(input => campos.push(input));
-        bccInputs.forEach(input => campos.push(input));
-
-        return campos;
+        return correosDetectados;
     }
 
-    function verificarBloqueo() {
-        const inputs = obtenerCamposCorreo();
-        const enviarBtn = document.querySelector('[data-test-id="composer:submit-button"]');
-        const advertenciaYaExiste = document.getElementById('alerta-correo-bloqueado');
+    function bloquearSiCorresponde() {
+        const encontrados = obtenerCorreosVisibles();
+        const prohibidos = encontrados.filter(c => correosBloqueados.includes(c));
 
-        const correosEncontrados = inputs
-            .map(input => normalizar(input.value))
-            .filter(val => val && correosBloqueados.includes(val));
+        const submitBtn = document.querySelector('[data-test-id^="footer:submit-button"]'); // "Submit as Open", etc.
+        const advertencia = document.getElementById("alerta-bloqueo");
 
-        if (correosEncontrados.length > 0) {
-            // Bloquear envío
-            if (enviarBtn) enviarBtn.disabled = true;
+        if (prohibidos.length > 0) {
+            if (submitBtn) submitBtn.disabled = true;
 
-            // Mostrar advertencia visual si no existe
-            if (!advertenciaYaExiste) {
-                const advertencia = document.createElement("div");
-                advertencia.id = "alerta-correo-bloqueado";
-                advertencia.textContent = `¡Dirección bloqueada detectada! No se puede enviar este ticket.`;
-                advertencia.style.background = "#ffcccc";
-                advertencia.style.color = "#900";
-                advertencia.style.padding = "10px";
-                advertencia.style.margin = "10px 0";
-                advertencia.style.border = "2px solid red";
-                advertencia.style.fontWeight = "bold";
-                document.querySelector('[data-test-id="composer:composer-form"]')?.prepend(advertencia);
+            if (!advertencia) {
+                const aviso = document.createElement("div");
+                aviso.id = "alerta-bloqueo";
+                aviso.innerText = `❌ No puedes enviar este ticket: destinatarios prohibidos detectados: ${prohibidos.join(", ")}`;
+                aviso.style.background = "#ffcccc";
+                aviso.style.color = "#900";
+                aviso.style.padding = "10px";
+                aviso.style.margin = "10px 0";
+                aviso.style.border = "2px solid red";
+                aviso.style.fontWeight = "bold";
+                aviso.style.fontSize = "14px";
+
+                const composerForm = document.querySelector('[data-test-id="composer:composer-form"]');
+                if (composerForm) composerForm.prepend(aviso);
             }
 
-            // Borrar campos bloqueados
-            inputs.forEach(input => {
-                if (correosBloqueados.includes(normalizar(input.value))) {
-                    input.value = "";
-                    input.dispatchEvent(new Event('input', { bubbles: true }));
-                }
-            });
-
-            alert(`Las siguientes direcciones están bloqueadas: \n${correosEncontrados.join(", ")}`);
+            console.warn("Correos bloqueados detectados en Zendesk:", prohibidos);
         } else {
-            if (enviarBtn) enviarBtn.disabled = false;
-            if (advertenciaYaExiste) advertenciaYaExiste.remove();
+            if (submitBtn) submitBtn.disabled = false;
+            if (advertencia) advertencia.remove();
         }
     }
 
-    // Observador de cambios
-    const observer = new MutationObserver(() => {
-        verificarBloqueo();
-    });
-
+    // Observador de cambios dinámicos
+    const observer = new MutationObserver(() => bloquearSiCorresponde());
     observer.observe(document.body, { childList: true, subtree: true });
 
-    // Revisión periódica por si el observador no detecta
-    setInterval(verificarBloqueo, 1500);
+    // Revisión extra cada 1.5s por seguridad
+    setInterval(bloquearSiCorresponde, 1500);
 })();
