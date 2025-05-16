@@ -227,8 +227,13 @@
     }
     
     // Convert regular paragraphs with better spacing
-    formattedContent = formattedContent.replace(/^(?!<h3|<ul|<\/ul>)(.+)$/gm, 
+    // Look for paragraphs that aren't already wrapped in HTML tags
+    formattedContent = formattedContent.replace(/^(?!<h3|<ul|<\/ul>|<li|<\/li>|<p|<\/p>)(.+)$/gm, 
       '<p style="margin:12px 0;line-height:1.6;">$1</p>');
+    
+    // Make sure paragraphs have proper spacing in between
+    // Replace single line breaks with proper paragraphs
+    formattedContent = formattedContent.replace(/<\/p>\s*<p/g, '</p>\n\n<p');
     
     return formattedContent;
   }
@@ -424,14 +429,8 @@ Please see the attached documentation, including the signed rental contract and 
         const cause = selectedCauses[i];
         const snippet = DEFENDER_SNIPPETS_HTML[cause] || `<p>${cause} (no snippet found)</p>`;
         
-        // Add cause title if there are multiple causes
-        if (selectedCauses.length > 1) {
-          htmlContent += `
-            <div style="margin:25px 0 15px;background-color:#f7f9fc;padding:15px;border-left:4px solid #3855e5;border-radius:4px;">
-              <h2 style="margin:0;color:#3855e5;font-size:16px;font-weight:bold;">${cause}</h2>
-            </div>
-          `;
-        }
+        // Don't add cause title even if there are multiple causes
+        // We only use cause internally for reference
         
         htmlContent += snippet;
         
@@ -455,7 +454,7 @@ Please see the attached documentation, including the signed rental contract and 
         bodyLines.push(snippet);
       }
       const combinedBody = bodyLines.join('\n\n');
-      return GREETING + '\n' + combinedBody + '\n' + FAREWELL;
+      return GREETING + '\n' + combinedBody + '\n\n' + FAREWELL;
     }
   }
 
@@ -1267,20 +1266,15 @@ Please see the attached documentation, including the signed rental contract and 
       const subj = getTicketSubject();
       const refNum = extractRefNumber(subj);
       if (!refNum) {
+        // Keep only critical alert for missing reference
         alert('No valid reference found in subject!');
         return;
       }
       setTextFieldByLabel(REFERENCIA_LABEL, refNum);
 
-      const chosen = await showDefenderPopup();
-      if (!chosen || chosen.length === 0) {
-        setReplyText(ACEPTAR_TEXT_HTML, true);
-        alert('No causes selected. Short accept text inserted.');
-        return;
-      }
-      setTextFieldByLabel(TIPOLOGIA_LABEL, chosen[0]);
+      // Skip reason selection for ACEPTAR - it's always the same
       setReplyText(ACEPTAR_TEXT_HTML, true);
-      alert(`Ref #${refNum}. Tipología='${chosen[0]}'. Inserted short accept text.`);
+      // No alert - fully automatic
     });
 
     // DEFENDER => multi-cause text
@@ -1288,6 +1282,7 @@ Please see the attached documentation, including the signed rental contract and 
       const subj = getTicketSubject();
       const refNum = extractRefNumber(subj);
       if (!refNum) {
+        // Keep only critical alert for missing reference
         alert('No valid reference found in subject!');
         return;
       }
@@ -1295,13 +1290,13 @@ Please see the attached documentation, including the signed rental contract and 
 
       const chosen = await showDefenderPopup();
       if (!chosen || chosen.length === 0) {
-        alert('No causes selected => do nothing.');
+        // User canceled or didn't select anything
         return;
       }
       setTextFieldByLabel(TIPOLOGIA_LABEL, chosen[0]);
       const finalMsg = buildDefenderMessage(chosen, true);
       setReplyText(finalMsg, true);
-      alert(`Ref #${refNum}. Tipología='${chosen[0]}'. Inserted multi-cause text (single greeting/farewell).`);
+      // No alert - fully automatic
     });
   }
 
