@@ -175,11 +175,11 @@
   
   // New HTML styled ACEPTAR text
   const ACEPTAR_TEXT_HTML = `
-  <div style="font-family:'Nunito',Verdana,sans-serif;font-size:14px;line-height:1.5;color:#333;">
-    <p>Dear Partner,</p>
-    <p>Thanks for your email.</p>
-    <p style="font-weight:bold;color:#4CAF50;">We accept the proposed chargeback.</p>
-    <p style="margin-top:20px;">Kind regards,</p>
+  <div style="font-family:'Nunito',Verdana,sans-serif;font-size:14px;line-height:1.6;color:#333;max-width:800px;">
+    <p style="font-size:15px;margin-bottom:15px;">Dear Partner,</p>
+    <p style="margin:15px 0;">Thanks for your email.</p>
+    <p style="font-weight:bold;color:#4CAF50;margin:20px 0;font-size:15px;">We accept the proposed chargeback.</p>
+    <p style="margin-top:25px;font-size:15px;">Kind regards,</p>
   </div>
   `;
 
@@ -213,18 +213,22 @@
     let formattedContent = content;
     
     // Replace numbered points with bold headings
-    formattedContent = formattedContent.replace(/(\d+\.\s+)([^\n]+)/g, '<h3 style="margin:15px 0 5px;color:#3855e5;font-size:15px;">$1$2</h3>');
+    formattedContent = formattedContent.replace(/(\d+\.\s*)([^\n]+)/g, 
+      '<h3 style="margin:25px 0 15px;color:#3855e5;font-size:16px;font-weight:bold;border-bottom:1px solid #eee;padding-bottom:8px;">$1$2</h3>');
     
     // Replace arrow points with list items
-    formattedContent = formattedContent.replace(/(->\s+)([^\n]+)/g, '<li>$2</li>');
+    formattedContent = formattedContent.replace(/(->\s+)([^\n]+)/g, 
+      '<li style="margin-bottom:8px;position:relative;">$2</li>');
     
-    // Wrap lists in <ul> tags
-    if (formattedContent.includes('<li>')) {
-      formattedContent = formattedContent.replace(/(<li>.*?<\/li>)/gs, '<ul style="margin:5px 0 15px 20px;padding-left:10px;">$1</ul>');
+    // Wrap lists in <ul> tags with better styling
+    if (formattedContent.includes('<li')) {
+      formattedContent = formattedContent.replace(/(<li.*?<\/li>)/gs, 
+        '<ul style="margin:15px 0 20px 10px;padding-left:25px;list-style-type:circle;">$1</ul>');
     }
     
-    // Convert regular paragraphs
-    formattedContent = formattedContent.replace(/^(?!<h3|<ul|<\/ul>)(.+)$/gm, '<p>$1</p>');
+    // Convert regular paragraphs with better spacing
+    formattedContent = formattedContent.replace(/^(?!<h3|<ul|<\/ul>)(.+)$/gm, 
+      '<p style="margin:12px 0;line-height:1.6;">$1</p>');
     
     return formattedContent;
   }
@@ -412,20 +416,33 @@ Please see the attached documentation, including the signed rental contract and 
   function buildDefenderMessage(selectedCauses, useHTML = true) {
     if (useHTML) {
       let htmlContent = `
-      <div style="font-family:'Nunito',Verdana,sans-serif;font-size:14px;line-height:1.5;color:#333;">
-        <p>Dear Partner,</p>
+      <div style="font-family:'Nunito',Verdana,sans-serif;font-size:14px;line-height:1.6;color:#333;max-width:800px;">
+        <p style="font-size:15px;margin-bottom:20px;">Dear Partner,</p>
       `;
       
-      for (let cause of selectedCauses) {
+      for (let i = 0; i < selectedCauses.length; i++) {
+        const cause = selectedCauses[i];
         const snippet = DEFENDER_SNIPPETS_HTML[cause] || `<p>${cause} (no snippet found)</p>`;
+        
+        // Add cause title if there are multiple causes
+        if (selectedCauses.length > 1) {
+          htmlContent += `
+            <div style="margin:25px 0 15px;background-color:#f7f9fc;padding:15px;border-left:4px solid #3855e5;border-radius:4px;">
+              <h2 style="margin:0;color:#3855e5;font-size:16px;font-weight:bold;">${cause}</h2>
+            </div>
+          `;
+        }
+        
         htmlContent += snippet;
-        if (selectedCauses.length > 1 && cause !== selectedCauses[selectedCauses.length - 1]) {
-          htmlContent += '<hr style="margin:20px 0;border:none;border-top:1px solid #eee;">';
+        
+        // Add separator between causes except after the last one
+        if (i < selectedCauses.length - 1) {
+          htmlContent += '<hr style="margin:30px 0;border:none;border-top:1px solid #eee;height:1px;">';
         }
       }
       
       htmlContent += `
-        <p style="margin-top:20px;">Kind regards,</p>
+        <p style="margin-top:30px;font-size:15px;">Kind regards,</p>
       </div>
       `;
       
