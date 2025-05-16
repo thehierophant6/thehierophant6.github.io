@@ -68,25 +68,34 @@
     editorDiv.focus();
     
     if (isHTML) {
-      // For HTML content, insert as HTML
-      editorDiv.innerHTML = fullMessage;
+      // For HTML content, we'll use the clipboard API which works better with CKEditor
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = fullMessage;
       
-      // Create a range at the end of content
-      const range = document.createRange();
-      range.selectNodeContents(editorDiv);
-      range.collapse(false);
+      // Create a new clipboard event
+      const clipboardData = new DataTransfer();
+      clipboardData.setData('text/html', fullMessage);
+      clipboardData.setData('text/plain', tempDiv.textContent);
       
-      // Select the range
-      const selection = window.getSelection();
-      selection.removeAllRanges();
-      selection.addRange(range);
-      
-      // Dispatch input event to notify CKEditor
-      const inputEvent = new InputEvent('input', {
+      const pasteEvent = new ClipboardEvent('paste', {
         bubbles: true,
-        cancelable: true
+        cancelable: true,
+        clipboardData: clipboardData
       });
-      editorDiv.dispatchEvent(inputEvent);
+      
+      // Dispatch the paste event
+      editorDiv.dispatchEvent(pasteEvent);
+      
+      // If the paste event doesn't work, fallback to insertHTML command if available
+      try {
+        if (!pasteEvent.defaultPrevented) {
+          document.execCommand('insertHTML', false, fullMessage);
+        }
+      } catch (e) {
+        console.warn('Failed to insert HTML via execCommand:', e);
+        // Last resort fallback: direct innerHTML (may not trigger proper CKEditor events)
+        editorDiv.innerHTML = fullMessage;
+      }
     } else {
       // Original line-by-line plain text handling
       fullMessage = fullMessage.replace(/\r\n/g, '\n');
@@ -173,6 +182,9 @@
     <p style="margin-top:20px;">Kind regards,</p>
   </div>
   `;
+
+  // For backward compatibility, define ACEPTAR_TEXT
+  const ACEPTAR_TEXT = ACEPTAR_TEXT_PLAIN;
 
   const GREETING = "Dear Partner,";
   const FAREWELL = "Kind regards,";
@@ -669,6 +681,7 @@ Please see the attached documentation, including the signed rental contract and 
         width: 80px; height: 80px; margin-right: 15px;
         object-fit: contain; background: #fff;
         border: 1px solid #eee;
+        cursor: pointer;
       }
       .archivos-preview-details {
         flex: 1;
@@ -697,6 +710,32 @@ Please see the attached documentation, including the signed rental contract and 
       .archivos-empty {
         text-align: center; padding: 20px; color: #666;
         font-style: italic;
+      }
+      .archivos-preview-btn {
+        background: #3855e5; color: white;
+        border: none; border-radius: 3px; 
+        padding: 3px 8px; margin-top: 5px;
+        cursor: pointer; font-size: 12px;
+      }
+      #largePdfPreview {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: rgba(0,0,0,0.85); z-index: 1000000;
+        display: flex; flex-direction: column;
+        justify-content: center; align-items: center;
+      }
+      #largePdfPreviewContent {
+        max-width: 90%; max-height: 80%;
+        box-shadow: 0 0 20px rgba(0,0,0,0.3);
+      }
+      #largePdfPreviewClose {
+        position: absolute; top: 20px; right: 20px;
+        background: rgba(255,255,255,0.2); color: white;
+        border: none; border-radius: 50%; width: 36px; height: 36px;
+        display: flex; align-items: center; justify-content: center;
+        cursor: pointer; font-size: 24px;
+      }
+      #largePdfPreviewName {
+        color: white; margin-bottom: 15px; font-size: 16px;
       }
     `;
     document.head.appendChild(style);
@@ -742,6 +781,82 @@ Please see the attached documentation, including the signed rental contract and 
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
+    // Large preview container (hidden initially)
+    const createLargePreview = () => {
+      const largePreview = document.createElement('div');
+      largePreview.id = 'largePdfPreview';
+      largePreview.style.display = 'none';
+      
+      const previewName = document.createElement('div');
+      previewName.id = 'largePdfPreviewName';
+      
+      const previewContent = document.createElement('img');
+      previewContent.id = 'largePdfPreviewContent';
+      
+      const previewClose = document.createElement('button');
+      previewClose.id = 'largePdfPreviewClose';
+      previewClose.textContent = '✕';
+      previewClose.addEventListener('click', () => {
+        largePreview.style.display = 'none';
+      });
+      
+      largePreview.appendChild(previewName);
+      largePreview.appendChild(previewContent);
+      largePreview.appendChild(previewClose);
+      document.body.appendChild(largePreview);
+      
+      // Close when clicking background
+      largePreview.addEventListener('click', (e) => {
+        if (e.target === largePreview) {
+          largePreview.style.display = 'none';
+        }
+      });
+      
+      return {
+        show: (title, contentUrl, type) => {
+          previewName.textContent = title;
+          
+          if (type === PDF_MIME) {
+            // For PDFs, embed PDF viewer
+            const iframe = document.createElement('iframe');
+            iframe.src = contentUrl;
+            iframe.style.width = '90vw';
+            iframe.style.height = '80vh';
+            iframe.style.border = 'none';
+            iframe.style.backgroundColor = 'white';
+            
+            if (previewContent.tagName === 'IFRAME') {
+              largePreview.replaceChild(iframe, previewContent);
+            } else {
+              largePreview.replaceChild(iframe, previewContent);
+            }
+            previewContent = iframe;
+          } else {
+            // For images, use img
+            const img = document.createElement('img');
+            img.id = 'largePdfPreviewContent';
+            img.src = contentUrl;
+            img.style.maxWidth = '90%';
+            img.style.maxHeight = '80%';
+            
+            if (previewContent.tagName === 'IMG') {
+              largePreview.replaceChild(img, previewContent);
+            } else {
+              largePreview.replaceChild(img, previewContent);
+            }
+            previewContent = img;
+          }
+          
+          largePreview.style.display = 'flex';
+        },
+        hide: () => {
+          largePreview.style.display = 'none';
+        }
+      };
+    };
+    
+    const largePreview = createLargePreview();
+
     // We'll store selected files
     let selectedFiles = [];
     let dragSource = null;
@@ -768,13 +883,25 @@ Please see the attached documentation, including the signed rental contract and 
         const thumb = document.createElement('img');
         thumb.className = 'archivos-preview-thumbnail';
         
+        let objectUrl = null;
+        
         if (file.type === PDF_MIME) {
           // PDF placeholder
           thumb.src = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj48cGF0aCBmaWxsPSIjZTJlNWU3IiBkPSJNMTI4IDBjLTE3LjYgMC0zMiAxNC40LTMyIDMydjQ0OGMwIDE3LjYgMTQuNCAzMiAzMiAzMmgyNTZjMTcuNiAwIDMyLTE0LjQgMzItMzJWMTI4TDMwNCAwSDEyOHoiLz48cGF0aCBmaWxsPSIjYjVjM2QxIiBkPSJNMzg0IDEyOGgtODBjLTE3LjYgMC0zMi0xNC40LTMyLTMyVjBsODAgNzJoMzJ2NTZaIi8+PHBhdGggZmlsbD0iI2Y0NDMzNiIgZD0iTTM4NCAyNTZIMTI4Yy04LjggMC0xNi03LjItMTYtMTZ2LTMyYzAtOC44IDcuMi0xNiAxNi0xNmgyNTZjOC44IDAgMTYgNy4yIDE2IDE2djMyYzAgOC44LTcuMiAxNi0xNiAxNnptMCA2NEgxMjhjLTguOCAwLTE2LTcuMi0xNi0xNnYtMzJjMC04LjggNy4yLTE2IDE2LTE2aDI1NmM4LjggMCAxNiA3LjIgMTYgMTZ2MzJjMCA4LjgtNy4yIDE2LTE2IDE2em0wIDY0SDEyOGMtOC44IDAtMTYtNy4yLTE2LTE2di0zMmMwLTguOCA3LjItMTYgMTYtMTZoMjU2YzguOCAwIDE2IDcuMiAxNiAxNnYzMmMwIDguOC03LjIgMTYtMTYgMTZ6Ii8+PC9zdmc+';
+          // Generate object URL for PDF
+          objectUrl = URL.createObjectURL(file);
         } else if (IMAGE_MIME_TYPES.includes(file.type)) {
           // Image preview
-          thumb.src = URL.createObjectURL(file);
+          objectUrl = URL.createObjectURL(file);
+          thumb.src = objectUrl;
         }
+        
+        // Add click handler for larger preview
+        thumb.addEventListener('click', (e) => {
+          e.stopPropagation(); // Prevent drag start
+          // Show large preview
+          largePreview.show(file.name, objectUrl, file.type);
+        });
         
         // Details
         const details = document.createElement('div');
@@ -787,8 +914,19 @@ Please see the attached documentation, including the signed rental contract and 
         const filesize = document.createElement('div');
         filesize.textContent = formatFileSize(file.size);
         
+        // Preview button
+        const previewBtn = document.createElement('button');
+        previewBtn.className = 'archivos-preview-btn';
+        previewBtn.textContent = 'Preview';
+        previewBtn.addEventListener('click', (e) => {
+          e.stopPropagation(); // Prevent drag start
+          // Show large preview
+          largePreview.show(file.name, objectUrl, file.type);
+        });
+        
         details.appendChild(filename);
         details.appendChild(filesize);
+        details.appendChild(previewBtn);
         
         // Move buttons
         const moveControls = document.createElement('div');
@@ -799,14 +937,20 @@ Please see the attached documentation, including the signed rental contract and 
         upBtn.className = 'archivos-move-btn';
         upBtn.innerHTML = '&uarr;';
         upBtn.disabled = index === 0;
-        upBtn.addEventListener('click', () => moveFile(index, 'up'));
+        upBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          moveFile(index, 'up');
+        });
         
         // Down button
         const downBtn = document.createElement('button');
         downBtn.className = 'archivos-move-btn';
         downBtn.innerHTML = '&darr;';
         downBtn.disabled = index === selectedFiles.length - 1;
-        downBtn.addEventListener('click', () => moveFile(index, 'down'));
+        downBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          moveFile(index, 'down');
+        });
         
         moveControls.appendChild(upBtn);
         moveControls.appendChild(downBtn);
