@@ -235,6 +235,14 @@
     // Replace single line breaks with proper paragraphs
     formattedContent = formattedContent.replace(/<\/p>\s*<p/g, '</p>\n\n<p');
     
+    // Add extra spacing before the final clarification paragraph
+    formattedContent = formattedContent.replace(/(evidence[\s\S]*?measures\.)<\/p>\s*<p>(We are available|We remain at your)/g, 
+      '$1</p>\n\n<p style="margin-top:25px;">$2');
+    
+    // Add extra space before any farewell/clarification paragraphs
+    formattedContent = formattedContent.replace(/<p>(We (are available|remain|stand|trust|apologize|regret))/g, 
+      '<p style="margin-top:25px;">$1');
+    
     return formattedContent;
   }
 
@@ -441,7 +449,7 @@ Please see the attached documentation, including the signed rental contract and 
       }
       
       htmlContent += `
-        <p style="margin-top:30px;font-size:15px;">Kind regards,</p>
+        <p style="margin-top:35px;font-size:15px;padding-top:10px;">Kind regards,</p>
       </div>
       `;
       
@@ -454,7 +462,7 @@ Please see the attached documentation, including the signed rental contract and 
         bodyLines.push(snippet);
       }
       const combinedBody = bodyLines.join('\n\n');
-      return GREETING + '\n' + combinedBody + '\n\n' + FAREWELL;
+      return GREETING + '\n\n' + combinedBody + '\n\n\n' + FAREWELL;
     }
   }
 
