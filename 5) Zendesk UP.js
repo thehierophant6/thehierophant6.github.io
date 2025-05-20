@@ -599,46 +599,95 @@ Please see the attached documentation, including the signed rental contract and 
 
   // Wait for pdf-lib
   async function waitForPDFLib() {
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
+      let attempts = 0;
+      const maxAttempts = 50; // 5 seconds total (50 * 100ms)
+      
       const check = () => {
+        attempts++;
+        console.log(`Checking for PDFLib (attempt ${attempts}/${maxAttempts})...`);
+        
         if (window.PDFLib && window.PDFLib.PDFDocument) {
+          console.log('PDFLib found!');
           resolve();
+        } else if (attempts >= maxAttempts) {
+          reject(new Error('PDFLib not loaded after multiple attempts. Check if the library is properly included.'));
         } else {
           setTimeout(check, 100);
         }
       };
+      
       check();
     });
   }
 
   async function mergeFilesIntoPDF(filesInfo) {
-    await waitForPDFLib();
-    const { PDFDocument } = window.PDFLib;
-    const mergedPdf = await PDFDocument.create();
+    try {
+      console.log('Waiting for PDFLib to load...');
+      await waitForPDFLib();
+      console.log('PDFLib loaded successfully');
+      
+      const { PDFDocument } = window.PDFLib;
+      console.log('Creating new PDF document');
+      const mergedPdf = await PDFDocument.create();
 
-    // Simple approach: add them in the order they come in
-    // (You can reorder or deduplicate if needed.)
-    for (let { file, arrayBuffer } of filesInfo) {
-      if (file.type === PDF_MIME) {
-        const pdfToMerge = await PDFDocument.load(arrayBuffer);
-        const copiedPages = await mergedPdf.copyPages(pdfToMerge, pdfToMerge.getPageIndices());
-        copiedPages.forEach(page => mergedPdf.addPage(page));
-      } else if (IMAGE_MIME_TYPES.includes(file.type)) {
-        // embed image in a new page
-        let embeddedImage;
-        const imgExt = file.type.split('/')[1].toLowerCase();
-        if (imgExt === 'png') {
-          embeddedImage = await mergedPdf.embedPng(arrayBuffer);
-        } else {
-          embeddedImage = await mergedPdf.embedJpg(arrayBuffer);
+      // Simple approach: add them in the order they come in
+      for (let i = 0; i < filesInfo.length; i++) {
+        const { file, arrayBuffer } = filesInfo[i];
+        console.log(`Processing file ${i+1}/${filesInfo.length}: ${file.name} (${file.type})`);
+        
+        if (file.type === PDF_MIME) {
+          console.log('Loading PDF document...');
+          try {
+            const pdfToMerge = await PDFDocument.load(arrayBuffer);
+            console.log('PDF loaded, copying pages...');
+            const pageIndices = pdfToMerge.getPageIndices();
+            console.log(`PDF has ${pageIndices.length} pages`);
+            
+            const copiedPages = await mergedPdf.copyPages(pdfToMerge, pageIndices);
+            console.log('Pages copied, adding to document...');
+            
+            copiedPages.forEach(page => mergedPdf.addPage(page));
+            console.log('Pages added successfully');
+          } catch (pdfErr) {
+            console.error('Error processing PDF:', pdfErr);
+            throw new Error(`Error processing PDF file ${file.name}: ${pdfErr.message}`);
+          }
+        } else if (IMAGE_MIME_TYPES.includes(file.type)) {
+          console.log('Processing image...');
+          try {
+            // embed image in a new page
+            let embeddedImage;
+            const imgExt = file.type.split('/')[1].toLowerCase();
+            
+            if (imgExt === 'png') {
+              console.log('Embedding PNG image...');
+              embeddedImage = await mergedPdf.embedPng(arrayBuffer);
+            } else {
+              console.log('Embedding JPG image...');
+              embeddedImage = await mergedPdf.embedJpg(arrayBuffer);
+            }
+            
+            console.log('Image embedded, creating page...');
+            const { width, height } = embeddedImage.scale(1);
+            const page = mergedPdf.addPage([width, height]);
+            
+            console.log('Drawing image on page...');
+            page.drawImage(embeddedImage, { x: 0, y: 0, width, height });
+            console.log('Image added successfully');
+          } catch (imgErr) {
+            console.error('Error processing image:', imgErr);
+            throw new Error(`Error processing image file ${file.name}: ${imgErr.message}`);
+          }
         }
-        const { width, height } = embeddedImage.scale(1);
-        const page = mergedPdf.addPage([width, height]);
-        page.drawImage(embeddedImage, { x: 0, y: 0, width, height });
       }
-    }
 
-    return mergedPdf.save();
+      console.log('All files processed, saving PDF...');
+      return mergedPdf.save();
+    } catch (err) {
+      console.error('Error in mergeFilesIntoPDF:', err);
+      throw err;
+    }
   }
 
   // Attempt to attach a File to the composer by simulating a "drop" event on the .ck-content
@@ -1155,19 +1204,32 @@ Please see the attached documentation, including the signed rental contract and 
       submitBtn.textContent = 'Processing...';
       
       try {
+        console.log('Starting PDF merge process for', selectedFiles.length, 'files');
         // Convert each File => arrayBuffer
         const filesInfo = [];
         for (let f of selectedFiles) {
-          let ab = await f.arrayBuffer();
-          filesInfo.push({ file: f, arrayBuffer: ab });
+          console.log('Processing file:', f.name, f.type);
+          try {
+            let ab = await f.arrayBuffer();
+            filesInfo.push({ file: f, arrayBuffer: ab });
+            console.log('Successfully processed file:', f.name);
+          } catch (fileErr) {
+            console.error('Error processing file:', f.name, fileErr);
+            throw new Error(`Error processing file: ${f.name}: ${fileErr.message}`);
+          }
         }
         
+        console.log('All files processed, starting merge operation');
         const mergedPdfBytes = await mergeFilesIntoPDF(filesInfo);
+        console.log('PDF merge completed, size:', mergedPdfBytes.length);
 
         // We'll rename the final PDF as "<RefNum>.pdf" or fallback to "merged_files.pdf"
         const finalPdfName = (refNum ? refNum : 'merged_files') + '.pdf';
+        console.log('Creating final PDF with name:', finalPdfName);
+        
         // 1) Create a Blob
         const blob = new Blob([mergedPdfBytes], { type: PDF_MIME });
+        
         // 2) Download it
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -1177,17 +1239,19 @@ Please see the attached documentation, including the signed rental contract and 
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
+        console.log('PDF download initiated');
 
         // 3) Also attach it to composer
         // We create a new File from the blob, with the same name
         const pdfFile = new File([blob], finalPdfName, { type: PDF_MIME });
         attachFileToComposer(pdfFile);
+        console.log('Attached PDF to composer');
 
         // 4) Close modal
         document.body.removeChild(overlay);
       } catch (err) {
         console.error('Error merging files:', err);
-        alert('Error merging files. Check console for details.');
+        alert('Error merging files: ' + err.message);
         submitBtn.disabled = false;
         submitBtn.textContent = 'Merge & Download PDF';
       }
@@ -1251,7 +1315,7 @@ Please see the attached documentation, including the signed rental contract and 
     aceptarBtn.style.cursor = 'pointer';
     aceptarBtn.style.display = 'none';
 
-    // DEFENDER
+    // DEFENDER (merged with ARCHIVOS functionality)
     const defenderBtn = document.createElement('button');
     defenderBtn.id = 'btnUpDefender';
     defenderBtn.textContent = 'DEFENDER';
@@ -1263,13 +1327,7 @@ Please see the attached documentation, including the signed rental contract and 
     defenderBtn.style.cursor = 'pointer';
     defenderBtn.style.display = 'none';
 
-    // ARCHIVOS (new)
-    const archBtn = addArchivosButton(footer, () => {
-      // read the subject again, extract ref
-      const subj = getTicketSubject();
-      return extractRefNumber(subj);
-    });
-
+    // Add buttons to the footer
     footer.prepend(upBtn, aceptarBtn, defenderBtn);
 
     // Toggle sub-buttons
@@ -1277,7 +1335,6 @@ Please see the attached documentation, including the signed rental contract and 
       const hidden = (aceptarBtn.style.display === 'none');
       aceptarBtn.style.display = hidden ? 'inline-block' : 'none';
       defenderBtn.style.display = hidden ? 'inline-block' : 'none';
-      archBtn.style.display = hidden ? 'inline-block' : 'none';
     });
 
     // ACEPTAR => short text
@@ -1296,7 +1353,7 @@ Please see the attached documentation, including the signed rental contract and 
       // No alert - fully automatic
     });
 
-    // DEFENDER => multi-cause text
+    // DEFENDER => multi-cause text + document upload and merge in one workflow
     defenderBtn.addEventListener('click', async () => {
       const subj = getTicketSubject();
       const refNum = extractRefNumber(subj);
@@ -1307,6 +1364,7 @@ Please see the attached documentation, including the signed rental contract and 
       }
       setTextFieldByLabel(REFERENCIA_LABEL, refNum);
 
+      // Step 1: Select reasons
       const chosen = await showDefenderPopup();
       if (!chosen || chosen.length === 0) {
         // User canceled or didn't select anything
@@ -1314,19 +1372,19 @@ Please see the attached documentation, including the signed rental contract and 
       }
       setTextFieldByLabel(TIPOLOGIA_LABEL, chosen[0]);
       
-      // Use the standard Defender message in the Zendesk text field
-      setReplyText(DEFENDER_TEXT_HTML, true);
-      
-      // Create a defender cover page PDF
+      // Step 2: Generate cover page and open document selection modal
       try {
+        // Use the standard Defender message in the Zendesk text field
+        setReplyText(DEFENDER_TEXT_HTML, true);
+        
+        // Create a defender cover page PDF
         const coverPageBytes = await generateDefenderCoverPage(chosen);
         
-        // Open a file selection modal similar to createArchivosModal 
-        // but with the cover page already included
+        // Open unified file selection modal with cover page already included
         createDefenderModal(refNum, coverPageBytes, chosen);
       } catch (err) {
         console.error('Error creating defender PDF:', err);
-        alert('Error creating defender PDF. Check console for details.');
+        alert('Error creating defender PDF: ' + err.message);
       }
     });
   }
@@ -1334,7 +1392,7 @@ Please see the attached documentation, including the signed rental contract and 
   const interval = setInterval(() => {
     injectUpButtons();
     if (document.getElementById('btnUpMain')) {
-      console.log('UP, ACEPTAR, DEFENDER, ARCHIVOS => loaded with rename & auto-attach.');
+      console.log('UP, ACEPTAR, DEFENDER => loaded with unified defender workflow');
       clearInterval(interval);
     }
   }, 1500);
@@ -1639,14 +1697,26 @@ Please see the attached documentation, including the signed rental contract and 
     header.style.display = 'flex';
     header.style.justifyContent = 'space-between';
     header.style.alignItems = 'center';
-    header.style.backgroundColor = '#f9f9f9';
+    header.style.backgroundColor = '#f44336';
+    header.style.color = 'white';
 
     const title = document.createElement('h2');
-    title.textContent = 'Defender Documents';
+    title.textContent = 'Defender Documentation';
     title.style.margin = '0';
     title.style.fontSize = '18px';
     title.style.fontWeight = 'bold';
-    title.style.color = '#333';
+    title.style.color = 'white';
+
+    const subtitle = document.createElement('div');
+    subtitle.textContent = 'Step 2: Add supporting documents';
+    subtitle.style.fontSize = '13px';
+    subtitle.style.opacity = '0.9';
+    
+    const titleContainer = document.createElement('div');
+    titleContainer.style.display = 'flex';
+    titleContainer.style.flexDirection = 'column';
+    titleContainer.appendChild(title);
+    titleContainer.appendChild(subtitle);
 
     const closeBtn = document.createElement('button');
     closeBtn.innerHTML = '&times;';
@@ -1654,7 +1724,7 @@ Please see the attached documentation, including the signed rental contract and 
     closeBtn.style.border = 'none';
     closeBtn.style.fontSize = '24px';
     closeBtn.style.cursor = 'pointer';
-    closeBtn.style.color = '#666';
+    closeBtn.style.color = 'white';
     closeBtn.style.width = '30px';
     closeBtn.style.height = '30px';
     closeBtn.style.display = 'flex';
@@ -1665,13 +1735,13 @@ Please see the attached documentation, including the signed rental contract and 
     closeBtn.style.marginLeft = 'auto';
 
     closeBtn.addEventListener('mouseover', () => {
-      closeBtn.style.backgroundColor = '#eee';
+      closeBtn.style.backgroundColor = 'rgba(255,255,255,0.2)';
     });
     closeBtn.addEventListener('mouseout', () => {
       closeBtn.style.backgroundColor = 'transparent';
     });
 
-    header.appendChild(title);
+    header.appendChild(titleContainer);
     header.appendChild(closeBtn);
 
     // Content area
@@ -1683,6 +1753,147 @@ Please see the attached documentation, including the signed rental contract and 
     content.style.flexDirection = 'column';
     content.style.gap = '20px';
 
+    // Progress indicator
+    const progressContainer = document.createElement('div');
+    progressContainer.style.display = 'flex';
+    progressContainer.style.justifyContent = 'center';
+    progressContainer.style.marginBottom = '10px';
+
+    const stepsContainer = document.createElement('div');
+    stepsContainer.style.display = 'flex';
+    stepsContainer.style.alignItems = 'center';
+    stepsContainer.style.gap = '10px';
+
+    // Step 1 (completed)
+    const step1 = document.createElement('div');
+    step1.style.display = 'flex';
+    step1.style.alignItems = 'center';
+    step1.style.gap = '8px';
+
+    const step1Circle = document.createElement('div');
+    step1Circle.style.width = '24px';
+    step1Circle.style.height = '24px';
+    step1Circle.style.borderRadius = '50%';
+    step1Circle.style.backgroundColor = '#4CAF50';
+    step1Circle.style.color = 'white';
+    step1Circle.style.display = 'flex';
+    step1Circle.style.justifyContent = 'center';
+    step1Circle.style.alignItems = 'center';
+    step1Circle.style.fontWeight = 'bold';
+    step1Circle.style.fontSize = '14px';
+    step1Circle.innerHTML = '✓';
+
+    const step1Text = document.createElement('div');
+    step1Text.textContent = 'Select Reasons';
+    step1Text.style.fontSize = '14px';
+    step1Text.style.fontWeight = 'bold';
+    step1Text.style.color = '#4CAF50';
+
+    step1.appendChild(step1Circle);
+    step1.appendChild(step1Text);
+
+    // Connector
+    const connector = document.createElement('div');
+    connector.style.width = '30px';
+    connector.style.height = '2px';
+    connector.style.backgroundColor = '#ddd';
+
+    // Step 2 (current)
+    const step2 = document.createElement('div');
+    step2.style.display = 'flex';
+    step2.style.alignItems = 'center';
+    step2.style.gap = '8px';
+
+    const step2Circle = document.createElement('div');
+    step2Circle.style.width = '24px';
+    step2Circle.style.height = '24px';
+    step2Circle.style.borderRadius = '50%';
+    step2Circle.style.backgroundColor = '#f44336';
+    step2Circle.style.color = 'white';
+    step2Circle.style.display = 'flex';
+    step2Circle.style.justifyContent = 'center';
+    step2Circle.style.alignItems = 'center';
+    step2Circle.style.fontWeight = 'bold';
+    step2Circle.style.fontSize = '14px';
+    step2Circle.textContent = '2';
+
+    const step2Text = document.createElement('div');
+    step2Text.textContent = 'Add Documents';
+    step2Text.style.fontSize = '14px';
+    step2Text.style.fontWeight = 'bold';
+    step2Text.style.color = '#333';
+
+    step2.appendChild(step2Circle);
+    step2.appendChild(step2Text);
+
+    // Connector
+    const connector2 = document.createElement('div');
+    connector2.style.width = '30px';
+    connector2.style.height = '2px';
+    connector2.style.backgroundColor = '#ddd';
+
+    // Step 3 (upcoming)
+    const step3 = document.createElement('div');
+    step3.style.display = 'flex';
+    step3.style.alignItems = 'center';
+    step3.style.gap = '8px';
+
+    const step3Circle = document.createElement('div');
+    step3Circle.style.width = '24px';
+    step3Circle.style.height = '24px';
+    step3Circle.style.borderRadius = '50%';
+    step3Circle.style.backgroundColor = '#eee';
+    step3Circle.style.color = '#666';
+    step3Circle.style.display = 'flex';
+    step3Circle.style.justifyContent = 'center';
+    step3Circle.style.alignItems = 'center';
+    step3Circle.style.fontWeight = 'bold';
+    step3Circle.style.fontSize = '14px';
+    step3Circle.textContent = '3';
+
+    const step3Text = document.createElement('div');
+    step3Text.textContent = 'Complete';
+    step3Text.style.fontSize = '14px';
+    step3Text.style.color = '#666';
+
+    step3.appendChild(step3Circle);
+    step3.appendChild(step3Text);
+
+    stepsContainer.appendChild(step1);
+    stepsContainer.appendChild(connector);
+    stepsContainer.appendChild(step2);
+    stepsContainer.appendChild(connector2);
+    stepsContainer.appendChild(step3);
+
+    progressContainer.appendChild(stepsContainer);
+    content.appendChild(progressContainer);
+
+    // Selected reasons summary
+    const reasonsSummary = document.createElement('div');
+    reasonsSummary.style.backgroundColor = '#f5f5f5';
+    reasonsSummary.style.padding = '15px';
+    reasonsSummary.style.borderRadius = '6px';
+    reasonsSummary.style.fontSize = '14px';
+    reasonsSummary.style.border = '1px solid #eee';
+    reasonsSummary.style.marginBottom = '10px';
+
+    const reasonsTitle = document.createElement('div');
+    reasonsTitle.style.fontWeight = 'bold';
+    reasonsTitle.style.marginBottom = '8px';
+    reasonsTitle.style.display = 'flex';
+    reasonsTitle.style.alignItems = 'center';
+    reasonsTitle.style.gap = '5px';
+    reasonsTitle.innerHTML = '<svg fill="#4CAF50" width="16" height="16" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg> Selected Reasons:';
+
+    const reasonsList = document.createElement('ul');
+    reasonsList.style.margin = '0';
+    reasonsList.style.paddingLeft = '25px';
+    reasonsList.innerHTML = selectedCauses.map(cause => `<li style="margin-bottom:4px;">${cause}</li>`).join('');
+
+    reasonsSummary.appendChild(reasonsTitle);
+    reasonsSummary.appendChild(reasonsList);
+    content.appendChild(reasonsSummary);
+
     // Info section explaining that cover page is already added
     const infoSection = document.createElement('div');
     infoSection.style.backgroundColor = '#e8f4fd';
@@ -1690,16 +1901,25 @@ Please see the attached documentation, including the signed rental contract and 
     infoSection.style.borderRadius = '6px';
     infoSection.style.fontSize = '14px';
     infoSection.style.border = '1px solid #d0e8ff';
-    infoSection.innerHTML = `
-      <div style="display:flex;align-items:center;margin-bottom:10px;">
-        <span style="font-weight:bold;font-size:16px;">Cover page with selected reasons already added</span>
-      </div>
-      <div>A cover page with the following reasons has been automatically created:</div>
-      <ul style="margin-top:8px;margin-bottom:8px;padding-left:25px;">
-        ${selectedCauses.map(cause => `<li>${cause}</li>`).join('')}
-      </ul>
-      <div>Add additional documents below to complete your defense package.</div>
+
+    const infoTitle = document.createElement('div');
+    infoTitle.style.fontWeight = 'bold';
+    infoTitle.style.fontSize = '15px';
+    infoTitle.style.marginBottom = '10px';
+    infoTitle.style.display = 'flex';
+    infoTitle.style.alignItems = 'center';
+    infoTitle.style.gap = '8px';
+    infoTitle.innerHTML = '<svg fill="#2196F3" width="20" height="20" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg> Documents Workflow';
+
+    const infoText = document.createElement('div');
+    infoText.innerHTML = `
+      <p style="margin-top:0;margin-bottom:8px;">1. A cover page with your selected reasons has been automatically created</p>
+      <p style="margin-top:0;margin-bottom:8px;">2. Add supporting documents below to complete your defense package</p>
+      <p style="margin-top:0;margin-bottom:0;">3. Click "Create Defense PDF" to generate and attach your complete document</p>
     `;
+
+    infoSection.appendChild(infoTitle);
+    infoSection.appendChild(infoText);
     content.appendChild(infoSection);
 
     // Previews container
@@ -1735,14 +1955,14 @@ Please see the attached documentation, including the signed rental contract and 
     coverInfo.style.minWidth = '0';
     
     const coverName = document.createElement('div');
-    coverName.textContent = 'Cover Page (Reasons)';
+    coverName.textContent = 'Cover Page with Reasons (Auto-Generated)';
     coverName.style.fontWeight = 'bold';
     coverName.style.whiteSpace = 'nowrap';
     coverName.style.overflow = 'hidden';
     coverName.style.textOverflow = 'ellipsis';
     
     const coverDesc = document.createElement('div');
-    coverDesc.textContent = 'Automatically generated - Position locked';
+    coverDesc.textContent = 'Always appears as the first page - Position locked';
     coverDesc.style.fontSize = '12px';
     coverDesc.style.color = '#666';
     
@@ -2026,7 +2246,7 @@ Please see the attached documentation, including the signed rental contract and 
     
     const cancelBtn = document.createElement('button');
     cancelBtn.textContent = 'Cancel';
-    cancelBtn.style.padding = '8px 16px';
+    cancelBtn.style.padding = '10px 16px';
     cancelBtn.style.border = '1px solid #ddd';
     cancelBtn.style.backgroundColor = '#f5f5f5';
     cancelBtn.style.borderRadius = '4px';
@@ -2034,14 +2254,35 @@ Please see the attached documentation, including the signed rental contract and 
     cancelBtn.style.marginRight = '10px';
     
     const submitBtn = document.createElement('button');
-    submitBtn.textContent = 'Create Defense PDF';
-    submitBtn.style.padding = '8px 16px';
+    submitBtn.innerHTML = '<svg fill="#fff" width="16" height="16" viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg> Create & Attach Defense PDF';
+    submitBtn.style.padding = '10px 20px';
     submitBtn.style.border = 'none';
     submitBtn.style.backgroundColor = '#f44336';
     submitBtn.style.color = '#fff';
     submitBtn.style.borderRadius = '4px';
     submitBtn.style.cursor = 'pointer';
     submitBtn.style.fontWeight = 'bold';
+    submitBtn.style.display = 'flex';
+    submitBtn.style.alignItems = 'center';
+    submitBtn.style.gap = '8px';
+    submitBtn.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
+    submitBtn.style.transition = 'background-color 0.2s, transform 0.1s';
+    
+    submitBtn.addEventListener('mouseover', () => {
+      submitBtn.style.backgroundColor = '#e53935';
+    });
+    
+    submitBtn.addEventListener('mouseout', () => {
+      submitBtn.style.backgroundColor = '#f44336';
+    });
+    
+    submitBtn.addEventListener('mousedown', () => {
+      submitBtn.style.transform = 'scale(0.98)';
+    });
+    
+    submitBtn.addEventListener('mouseup', () => {
+      submitBtn.style.transform = 'scale(1)';
+    });
     
     footer.appendChild(cancelBtn);
     footer.appendChild(submitBtn);
@@ -2069,32 +2310,54 @@ Please see the attached documentation, including the signed rental contract and 
     // SUBMIT => Merge & Download
     submitBtn.addEventListener('click', async () => {
       if (selectedFiles.length === 1) {
-        alert('Please add documents to your defense package!');
+        alert('Please add supporting documents to your defense package!');
         return;
       }
       
+      // Update UI to show processing
       submitBtn.disabled = true;
-      submitBtn.textContent = 'Processing...';
+      submitBtn.innerHTML = '<div style="width:16px;height:16px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:defender-spin 0.8s linear infinite;margin-right:8px;"></div> Processing...';
+      const styleEl = document.createElement('style');
+      styleEl.textContent = '@keyframes defender-spin {0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); }}';
+      document.head.appendChild(styleEl);
       
       try {
+        // Show step 3 as active
+        step2Circle.style.backgroundColor = '#4CAF50';
+        step2Circle.innerHTML = '✓';
+        step2Text.style.color = '#4CAF50';
+        connector2.style.backgroundColor = '#4CAF50';
+        step3Circle.style.backgroundColor = '#f44336';
+        step3Circle.style.color = 'white';
+        step3Text.style.color = '#333';
+        step3Text.style.fontWeight = 'bold';
+        
+        console.log('Starting defense PDF creation process...');
+        
         // Convert each File => arrayBuffer (skip the first one, which is the cover page)
         const filesInfo = [];
         for (let i = 1; i < selectedFiles.length; i++) {
           let file = selectedFiles[i];
+          console.log(`Processing file ${i}/${selectedFiles.length-1}: ${file.name}`);
           let ab = await file.arrayBuffer();
           filesInfo.push({ file, arrayBuffer: ab });
         }
         
         // First, let's create an array buffer from the coverPageBytes
+        console.log('Processing cover page');
         const coverPageArrayBuffer = await coverPageFile.arrayBuffer();
         
         // Merge all files with cover page
+        console.log('Merging files into final PDF');
         const mergedPdfBytes = await mergeDefenderFiles(coverPageArrayBuffer, filesInfo);
         
         // We'll rename the final PDF as "<RefNum>.pdf" or fallback to "defense_document.pdf"
         const finalPdfName = (refNum ? refNum : 'defense_document') + '.pdf';
+        console.log(`Creating final PDF: ${finalPdfName}`);
+        
         // 1) Create a Blob
         const blob = new Blob([mergedPdfBytes], { type: PDF_MIME });
+        
         // 2) Download it
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -2106,17 +2369,24 @@ Please see the attached documentation, including the signed rental contract and 
         URL.revokeObjectURL(url);
         
         // 3) Also attach it to composer
-        // We create a new File from the blob, with the same name
+        console.log('Attaching PDF to Zendesk composer');
         const pdfFile = new File([blob], finalPdfName, { type: PDF_MIME });
         attachFileToComposer(pdfFile);
         
-        // 4) Close modal
-        document.body.removeChild(overlay);
+        // 4) Show success message briefly before closing
+        submitBtn.style.backgroundColor = '#4CAF50';
+        submitBtn.innerHTML = '<svg fill="#fff" width="16" height="16" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg> Defense PDF Created Successfully!';
+        
+        // Close modal after a brief delay
+        setTimeout(() => {
+          document.body.removeChild(overlay);
+        }, 1500);
+        
       } catch (err) {
-        console.error('Error merging files:', err);
-        alert('Error merging files. Check console for details.');
+        console.error('Error creating defense PDF:', err);
+        alert('Error creating defense PDF: ' + err.message);
         submitBtn.disabled = false;
-        submitBtn.textContent = 'Create Defense PDF';
+        submitBtn.innerHTML = '<svg fill="#fff" width="16" height="16" viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg> Create & Attach Defense PDF';
       }
     });
   }
