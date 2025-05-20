@@ -11,6 +11,13 @@
 // @require      https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js
 // ==/UserScript==
 
+/********************************************************************
+ * PATCH — 20 May 2025
+ * Fixes:
+ *  1) Defender letter was being cut    →  use chunked insertion & <template/>
+ *  2) PDF downloaded but not attached  →  robust multi-strategy attach()
+ ********************************************************************/
+
 (function() {
   'use strict';
 
@@ -193,57 +200,30 @@
   /*** 2) CKEDITOR LINE-BY-LINE TEXT INSERT (Tribute.js style) ***/
   /***************************************************************/
   function setReplyText(fullMessage, isHTML = false) {
-    const editorDiv = document.querySelector('.ck.ck-content[contenteditable="true"]');
-    if (!editorDiv) {
-      console.warn('No CKEditor editor found. Cannot paste text lines.');
-      return;
-    }
-    editorDiv.focus();
-    
-    if (isHTML) {
-      // For HTML content, we'll use the clipboard API which works better with CKEditor
-      const tempDiv = document.createElement('div');
-      tempDiv.innerHTML = fullMessage;
-      
-      // Create a new clipboard event
-      const clipboardData = new DataTransfer();
-      clipboardData.setData('text/html', fullMessage);
-      clipboardData.setData('text/plain', tempDiv.textContent);
-      
-      const pasteEvent = new ClipboardEvent('paste', {
-        bubbles: true,
-        cancelable: true,
-        clipboardData: clipboardData
-      });
-      
-      // Dispatch the paste event
-      editorDiv.dispatchEvent(pasteEvent);
-      
-      // If the paste event doesn't work, fallback to insertHTML command if available
-      try {
-        if (!pasteEvent.defaultPrevented) {
-          document.execCommand('insertHTML', false, fullMessage);
-        }
-      } catch (e) {
-        console.warn('Failed to insert HTML via execCommand:', e);
-        // Last resort fallback: direct innerHTML (may not trigger proper CKEditor events)
-        editorDiv.innerHTML = fullMessage;
-      }
-    } else {
-      // Original line-by-line plain text handling
-      fullMessage = fullMessage.replace(/\r\n/g, '\n');
-      const lines = fullMessage.split('\n');
-      for (let i = 0; i < lines.length; i++) {
-        insertTextInCKEditor(editorDiv, lines[i]);
-        if (i < lines.length - 1) {
-          insertTextInCKEditor(editorDiv, '\n');
-        }
-      }
-    }
+  const editorDiv = document.querySelector('.ck.ck-content[contenteditable="true"]');
+  if (!editorDiv) { console.warn('CKEditor not found'); return; }
 
-    editorDiv.blur();
-    setTimeout(() => editorDiv.focus(), 50);
+  editorDiv.focus();
+
+  if (isHTML) {
+    /* use <template> to avoid DOM re-serialisation, then inject in slices < 15 kB */
+    const temp = document.createElement('template');
+    temp.innerHTML = fullMessage.trim();
+
+    const html = temp.innerHTML;
+    const sliceSize = 15000;                                    // Zendesk keeps everything ≤ 20 kB per op.
+    for (let pos = 0; pos < html.length; pos += sliceSize) {
+      document.execCommand('insertHTML', false, html.slice(pos, pos + sliceSize));
+    }
+  } else {
+    /* untouched plain-text path */
+    fullMessage.split(/\r?\n/).forEach((line, i, arr) => {
+      insertTextInCKEditor(editorDiv, line + (i < arr.length - 1 ? '\n' : ''));
+    });
   }
+  editorDiv.blur();
+  setTimeout(() => editorDiv.focus(), 50);
+}
 
   function insertTextInCKEditor(editorDiv, chunk) {
     const range = document.createRange();
@@ -603,75 +583,55 @@ Please see the attached documentation, including the signed rental contract and 
   });
 
   function buildDefenderMessage(selectedCauses, useHTML = true) {
-    if (useHTML) {
-      let htmlContent = `
-      <div style="font-family:'Nunito',Verdana,sans-serif;font-size:14px;line-height:1.6;color:#333;max-width:800px;">
-        <p style="font-size:15px;margin-bottom:20px;">Dear Partner,</p>
-        
-        <p style="margin:15px 0;">Thanks for your email.</p>
-        
-        <p style="font-weight:bold;color:#f44336;margin:20px 0;font-size:15px;">We do not accept the proposed chargeback.</p>
-        
-        <p style="margin:15px 0;">Please find below and attached the documentation with our reasons for defending this case.</p>
-      `;
-      
-      // Detailed reasons section
-      if (selectedCauses.length > 0) {
-        htmlContent += `
-        <div style="margin-top:25px;background-color:#f8f9fa;border:1px solid #e9ecef;border-left:4px solid #3855e5;padding:15px;margin-bottom:15px;border-radius:5px;">
-          <div style="font-weight:bold;color:#3855e5;margin-bottom:10px;">Defense reasons:</div>
-          <ul style="margin:10px 0;padding-left:20px;">
-        `;
-        
-        selectedCauses.forEach(cause => {
-          htmlContent += `<li style="margin-bottom:8px;font-weight:500;">${cause}</li>`;
-        });
-        
-        htmlContent += `
-          </ul>
-        </div>
-        `;
-      }
-      
-      // Include full defense text for each selected cause
-      for (let i = 0; i < selectedCauses.length; i++) {
-        const cause = selectedCauses[i];
-        const snippet = DEFENDER_SNIPPETS_HTML[cause] || `<p>${cause} (no snippet found)</p>`;
-        
-        // Add section header for each cause if there are multiple
-        if (selectedCauses.length > 1) {
-          htmlContent += `
-          <div style="margin-top:30px;margin-bottom:10px;background-color:#f8f9fa;padding:15px;border-left:4px solid #f44336;">
-            <div style="font-weight:bold;font-size:16px;">Defense Reason ${i+1}: ${cause}</div>
-          </div>
-          `;
-        }
-        
-        htmlContent += snippet;
-        
-        // Add separator between causes except after the last one
-        if (i < selectedCauses.length - 1) {
-          htmlContent += '<hr style="margin:30px 0;border:none;border-top:1px solid #eee;height:1px;">';
-        }
-      }
-      
-      htmlContent += `
-        <p style="margin-top:35px;font-size:15px;padding-top:10px;">Kind regards,</p>
-      </div>
-      `;
-      
-      return htmlContent;
-    } else {
-      // Original plain text version
-      let bodyLines = [];
-      for (let cause of selectedCauses) {
-        const snippet = DEFENDER_SNIPPETS[cause] || (cause + " (no snippet found)");
-        bodyLines.push(snippet);
-      }
-      const combinedBody = bodyLines.join('\n\n');
-      return GREETING + '\n\n' + combinedBody + '\n\n\n' + FAREWELL;
+  if (!useHTML) {
+    // Original plain text version
+    let bodyLines = [];
+    for (let cause of selectedCauses) {
+      const snippet = DEFENDER_SNIPPETS[cause] || (cause + " (no snippet found)");
+      bodyLines.push(snippet);
     }
+    const combinedBody = bodyLines.join('\n\n');
+    return GREETING + '\n\n' + combinedBody + '\n\n\n' + FAREWELL;
   }
+  
+  /* full "super-aesthetic" template – no inline styles inside snippets anymore */
+  const header = `
+  <div style="font-family:'Nunito',Verdana,sans-serif;max-width:850px;margin:0 auto">
+    <header style="background:#3855e5;background:linear-gradient(90deg,#3855e5 0%,#4f6bff 100%);
+                   color:#fff;padding:24px 32px;border-radius:12px 12px 0 0">
+      <h1 style="margin:0;font-size:28px;letter-spacing:.5px">OK Mobility Group</h1>
+      <p style="margin:6px 0 0;font-size:15px;opacity:.9">Chargeback defence documentation</p>
+      <p style="margin:2px 0 0;font-size:13px;opacity:.8">${new Date()
+        .toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}</p>
+    </header>
+    <main style="background:#fff;border:1px solid #e2e8ff;border-top:0;padding:32px;border-radius:0 0 12px 12px">
+      <p style="font-size:16px">Dear Partner,</p>
+      <p style="margin:12px 0 24px 0">Thanks for your e-mail.</p>
+      <p style="font-size:17px;font-weight:700;color:#e02b2b;margin:0 0 24px">
+        We do not accept the proposed chargeback.
+      </p>
+      <p style="margin:0 0 32px">Please find below and attached the documentation with our reasons for defending this case.</p>`;
+
+  const footer = `
+      <p style="margin:40px 0 0 0">Kind regards,</p>
+    </main>
+  </div>`;
+
+  /* prettier snippets – we trust they're already HTML (created once at start-up)  */
+  let body = '';
+  selectedCauses.forEach((cause, idx) => {
+    const panel = `
+      <section style="margin-bottom:40px">
+        ${selectedCauses.length > 1
+          ? `<h2 style="font-size:18px;margin:0 0 12px;color:#3855e5">Reason ${idx + 1}: ${cause}</h2>`
+          : ''}
+        ${DEFENDER_SNIPPETS_HTML[cause] || `<p>${cause}</p>`}
+      </section>`;
+    body += panel;
+  });
+
+  return header + body + footer;
+}
 
   /***********************************************************/
   /*** 4) MULTI-SELECT POPUP (For ACEPTAR/DEFENDER)         ***/
@@ -912,43 +872,31 @@ Please see the attached documentation, including the signed rental contract and 
   }
 
   // Attempt to attach a File to the composer by simulating a "drop" event on the .ck-content
-  function attachFileToComposer(file) {
-    // Find the CKEditor composer
-    const composer = document.querySelector('.ck.ck-content[contenteditable="true"]');
-    if (!composer) {
-      console.warn("No CKEditor composer found to attach file.");
-      return false;
-    }
-
-    try {
-      console.log("Preparing to attach file:", file.name);
-      
-      // Create a DataTransfer with the file
-      const dataTransfer = new DataTransfer();
-      dataTransfer.items.add(file);
-
-      // Construct a DragEvent with dataTransfer
-      const dropEvent = new DragEvent('drop', {
-        bubbles: true,
-        cancelable: true,
-        composed: true,
-        dataTransfer
-      });
-
-      // Dispatch it on the composer
-      console.log("Simulating drop event with file:", file.name);
-      composer.dispatchEvent(dropEvent);
-      
-      // Give focus to the editor to ensure Zendesk processes the attachment
-      composer.focus();
-      
-      console.log("File attachment attempted for:", file.name);
-      return true;
-    } catch (err) {
-      console.error("Error in attachFileToComposer:", err);
-      return false;
-    }
+  async function attachFileToComposer(file) {
+  // a) first strategy – synthetic drop (old behaviour)
+  const composer = document.querySelector('.ck.ck-content[contenteditable="true"]');
+  if (composer) {
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    const evt = new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt });
+    composer.dispatchEvent(evt);
+    await new Promise(r => setTimeout(r, 400));                // give Zendesk time to react
+    if (composer.closest('[data-test-id="file-upload-list"]')) return true;
   }
+
+  // b) fallback – feed the hidden <input type="file"> Zendesk uses internally
+  const hiddenInput = document.querySelector('input[type="file"][data-test-id="upload_input"], input[type="file"][multiple]');
+  if (hiddenInput) {
+    const dt2 = new DataTransfer();
+    dt2.items.add(file);
+    hiddenInput.files = dt2.files;
+    hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  }
+
+  console.warn('attachFileToComposer failed – composer not found');
+  return false;
+}
 
   // The main modal for ARCHIVOS button
   function createArchivosModal(refNum) {
