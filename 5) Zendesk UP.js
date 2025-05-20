@@ -183,6 +183,17 @@
   </div>
   `;
 
+  // New HTML styled DEFENDER text
+  const DEFENDER_TEXT_HTML = `
+  <div style="font-family:'Nunito',Verdana,sans-serif;font-size:14px;line-height:1.6;color:#333;max-width:800px;">
+    <p style="font-size:15px;margin-bottom:15px;">Dear Partner,</p>
+    <p style="margin:15px 0;">Thanks for your email.</p>
+    <p style="font-weight:bold;color:#f44336;margin:20px 0;font-size:15px;">We do not accept the proposed chargeback.</p>
+    <p style="margin:15px 0;">Please find attached the documentation with our reasons for defending this case.</p>
+    <p style="margin-top:25px;font-size:15px;">Kind regards,</p>
+  </div>
+  `;
+
   // For backward compatibility, define ACEPTAR_TEXT
   const ACEPTAR_TEXT = ACEPTAR_TEXT_PLAIN;
 
@@ -1302,9 +1313,21 @@ Please see the attached documentation, including the signed rental contract and 
         return;
       }
       setTextFieldByLabel(TIPOLOGIA_LABEL, chosen[0]);
-      const finalMsg = buildDefenderMessage(chosen, true);
-      setReplyText(finalMsg, true);
-      // No alert - fully automatic
+      
+      // Use the standard Defender message in the Zendesk text field
+      setReplyText(DEFENDER_TEXT_HTML, true);
+      
+      // Create a defender cover page PDF
+      try {
+        const coverPageBytes = await generateDefenderCoverPage(chosen);
+        
+        // Open a file selection modal similar to createArchivosModal 
+        // but with the cover page already included
+        createDefenderModal(refNum, coverPageBytes, chosen);
+      } catch (err) {
+        console.error('Error creating defender PDF:', err);
+        alert('Error creating defender PDF. Check console for details.');
+      }
     });
   }
 
@@ -1315,5 +1338,787 @@ Please see the attached documentation, including the signed rental contract and 
       clearInterval(interval);
     }
   }, 1500);
+
+  // New function to generate a PDF cover page with defender reasons
+  async function generateDefenderCoverPage(selectedCauses) {
+    await waitForPDFLib();
+    const { PDFDocument, rgb, StandardFonts } = window.PDFLib;
+    
+    // Create a new PDF document
+    const pdfDoc = await PDFDocument.create();
+    
+    // Add a blank page (A4 size)
+    const page = pdfDoc.addPage([595, 842]);
+    
+    // Get fonts
+    const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    
+    // OK Mobility colors
+    const okBlue = rgb(56/255, 85/255, 229/255); // #3855e5
+    
+    // Define margins
+    const margin = 50;
+    const width = page.getWidth() - 2 * margin;
+    
+    // Current y-position (start from top)
+    let y = page.getHeight() - margin;
+
+    // Add title
+    page.drawText("OK MOBILITY GROUP", {
+      x: margin,
+      y: y,
+      size: 24,
+      font: helveticaBold,
+      color: okBlue
+    });
+    
+    y -= 15;
+    
+    // Add horizontal line
+    page.drawLine({
+      start: { x: margin, y },
+      end: { x: page.getWidth() - margin, y },
+      thickness: 2,
+      color: okBlue
+    });
+    
+    y -= 40;
+    
+    // Add document title
+    page.drawText("CHARGEBACK DEFENSE DOCUMENTATION", {
+      x: margin,
+      y,
+      size: 18,
+      font: helveticaBold
+    });
+    
+    y -= 40;
+    
+    // Add current date
+    const today = new Date();
+    const dateStr = today.toLocaleDateString('en-GB', { 
+      day: '2-digit', 
+      month: '2-digit', 
+      year: 'numeric' 
+    });
+    
+    page.drawText(`Date: ${dateStr}`, {
+      x: margin,
+      y,
+      size: 12,
+      font: helvetica
+    });
+    
+    y -= 40;
+    
+    // Draw reasons section title
+    page.drawText("REASONS FOR REJECTING THE CHARGEBACK:", {
+      x: margin,
+      y,
+      size: 14,
+      font: helveticaBold,
+      color: okBlue
+    });
+    
+    y -= 30;
+    
+    // Add each selected cause
+    for (let cause of selectedCauses) {
+      // Calculate if text will fit on current page
+      if (y < margin + 100) {
+        // Add a new page if we're running out of space
+        page = pdfDoc.addPage([595, 842]);
+        y = page.getHeight() - margin;
+      }
+      
+      // Draw bullet point
+      page.drawText("•", {
+        x: margin,
+        y,
+        size: 12,
+        font: helvetica
+      });
+      
+      // Draw cause text
+      page.drawText(cause, {
+        x: margin + 15,
+        y,
+        size: 12,
+        font: helveticaBold
+      });
+      
+      y -= 20;
+      
+      // Add explanation text based on the cause (reuse snippets)
+      const snippet = DEFENDER_SNIPPETS[cause] || "";
+      // Extract first paragraph/sentence as summary
+      const summary = snippet.split('\n')[0]?.substring(0, 120) + "...";
+      
+      if (summary && summary.length > 3) {
+        // Word wrap the summary to fit the page width
+        const words = summary.split(' ');
+        let line = '';
+        
+        for (let word of words) {
+          const testLine = line + word + ' ';
+          const textWidth = helvetica.widthOfTextAtSize(testLine, 10);
+          
+          if (textWidth > width - 15) {
+            // Draw the current line
+            page.drawText(line, {
+              x: margin + 15,
+              y,
+              size: 10,
+              font: helvetica
+            });
+            y -= 15;
+            line = word + ' ';
+          } else {
+            line = testLine;
+          }
+        }
+        
+        // Draw the remaining text
+        if (line.trim()) {
+          page.drawText(line, {
+            x: margin + 15,
+            y,
+            size: 10,
+            font: helvetica
+          });
+          y -= 20;
+        }
+      }
+      
+      // Add extra spacing between causes
+      y -= 10;
+    }
+    
+    // Add footer
+    y = margin + 40;
+    
+    // Add horizontal line
+    page.drawLine({
+      start: { x: margin, y },
+      end: { x: page.getWidth() - margin, y },
+      thickness: 1,
+      color: okBlue
+    });
+    
+    y -= 25;
+    
+    // Add footer text
+    page.drawText("OK Mobility Group", {
+      x: margin,
+      y,
+      size: 10,
+      font: helveticaBold
+    });
+    
+    y -= 15;
+    
+    page.drawText("www.okmobility.com", {
+      x: margin,
+      y,
+      size: 10,
+      font: helvetica,
+      color: okBlue
+    });
+    
+    // Serialize the PDFDocument to bytes
+    const pdfBytes = await pdfDoc.save();
+    return pdfBytes;
+  }
+
+  // Function to merge defender cover page with other files
+  async function mergeDefenderFiles(coverPageBytes, filesInfo) {
+    await waitForPDFLib();
+    const { PDFDocument } = window.PDFLib;
+    
+    // Create the main PDF document starting with the cover page
+    const mainPdf = await PDFDocument.load(coverPageBytes);
+    
+    // Add each file in the order they come in
+    for (let { file, arrayBuffer } of filesInfo) {
+      if (file.type === PDF_MIME) {
+        const pdfToMerge = await PDFDocument.load(arrayBuffer);
+        const copiedPages = await mainPdf.copyPages(pdfToMerge, pdfToMerge.getPageIndices());
+        copiedPages.forEach(page => mainPdf.addPage(page));
+      } else if (IMAGE_MIME_TYPES.includes(file.type)) {
+        // embed image in a new page (same as in mergeFilesIntoPDF)
+        let embeddedImage;
+        const imgExt = file.type.split('/')[1].toLowerCase();
+        if (imgExt === 'png') {
+          embeddedImage = await mainPdf.embedPng(arrayBuffer);
+        } else {
+          embeddedImage = await mainPdf.embedJpg(arrayBuffer);
+        }
+        
+        // Create page with image aspect ratio
+        const { width, height } = embeddedImage;
+        const isLandscape = width > height;
+        
+        const imgPage = isLandscape 
+          ? mainPdf.addPage([842, 595]) // A4 landscape
+          : mainPdf.addPage([595, 842]); // A4 portrait
+        
+        // Scale image to fit page
+        const pageWidth = imgPage.getWidth() - 40;
+        const pageHeight = imgPage.getHeight() - 40;
+        const scaleW = pageWidth / width;
+        const scaleH = pageHeight / height;
+        const scale = Math.min(scaleW, scaleH);
+        
+        const scaledWidth = width * scale;
+        const scaledHeight = height * scale;
+        
+        // Center the image on the page
+        const x = (imgPage.getWidth() - scaledWidth) / 2;
+        const y = (imgPage.getHeight() - scaledHeight) / 2;
+        
+        imgPage.drawImage(embeddedImage, {
+          x,
+          y,
+          width: scaledWidth,
+          height: scaledHeight
+        });
+      }
+    }
+    
+    const pdfBytes = await mainPdf.save();
+    return pdfBytes;
+  }
+
+  // Function to create the defender modal with cover page already included
+  function createDefenderModal(refNum, coverPageBytes, selectedCauses) {
+    // Create a File object for the cover page
+    const coverPageFile = new File(
+      [coverPageBytes], 
+      'cover_page.pdf', 
+      { type: PDF_MIME }
+    );
+    
+    // Selected files array (starting with cover page)
+    const selectedFiles = [];
+    
+    // Add the cover page as the first file
+    selectedFiles.push(coverPageFile);
+    
+    // Create overlay container
+    const overlay = document.createElement('div');
+    overlay.style.position = 'fixed';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.backgroundColor = 'rgba(0,0,0,0.5)';
+    overlay.style.backdropFilter = 'blur(3px)';
+    overlay.style.display = 'flex';
+    overlay.style.justifyContent = 'center';
+    overlay.style.alignItems = 'center';
+    overlay.style.zIndex = '9999';
+
+    // Create modal container
+    const modal = document.createElement('div');
+    modal.style.backgroundColor = '#fff';
+    modal.style.borderRadius = '10px';
+    modal.style.boxShadow = '0 4px 20px rgba(0,0,0,0.2)';
+    modal.style.width = '90%';
+    modal.style.maxWidth = '800px';
+    modal.style.maxHeight = '90%';
+    modal.style.display = 'flex';
+    modal.style.flexDirection = 'column';
+    modal.style.overflow = 'hidden';
+    modal.style.position = 'relative';
+
+    // Header
+    const header = document.createElement('div');
+    header.style.padding = '15px 20px';
+    header.style.borderBottom = '1px solid #eee';
+    header.style.display = 'flex';
+    header.style.justifyContent = 'space-between';
+    header.style.alignItems = 'center';
+    header.style.backgroundColor = '#f9f9f9';
+
+    const title = document.createElement('h2');
+    title.textContent = 'Defender Documents';
+    title.style.margin = '0';
+    title.style.fontSize = '18px';
+    title.style.fontWeight = 'bold';
+    title.style.color = '#333';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.innerHTML = '&times;';
+    closeBtn.style.background = 'none';
+    closeBtn.style.border = 'none';
+    closeBtn.style.fontSize = '24px';
+    closeBtn.style.cursor = 'pointer';
+    closeBtn.style.color = '#666';
+    closeBtn.style.width = '30px';
+    closeBtn.style.height = '30px';
+    closeBtn.style.display = 'flex';
+    closeBtn.style.justifyContent = 'center';
+    closeBtn.style.alignItems = 'center';
+    closeBtn.style.borderRadius = '50%';
+    closeBtn.style.transition = 'background-color 0.2s';
+    closeBtn.style.marginLeft = 'auto';
+
+    closeBtn.addEventListener('mouseover', () => {
+      closeBtn.style.backgroundColor = '#eee';
+    });
+    closeBtn.addEventListener('mouseout', () => {
+      closeBtn.style.backgroundColor = 'transparent';
+    });
+
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+
+    // Content area
+    const content = document.createElement('div');
+    content.style.padding = '20px';
+    content.style.overflowY = 'auto';
+    content.style.flex = '1';
+    content.style.display = 'flex';
+    content.style.flexDirection = 'column';
+    content.style.gap = '20px';
+
+    // Info section explaining that cover page is already added
+    const infoSection = document.createElement('div');
+    infoSection.style.backgroundColor = '#e8f4fd';
+    infoSection.style.padding = '15px';
+    infoSection.style.borderRadius = '6px';
+    infoSection.style.fontSize = '14px';
+    infoSection.style.border = '1px solid #d0e8ff';
+    infoSection.innerHTML = `
+      <div style="display:flex;align-items:center;margin-bottom:10px;">
+        <span style="font-weight:bold;font-size:16px;">Cover page with selected reasons already added</span>
+      </div>
+      <div>A cover page with the following reasons has been automatically created:</div>
+      <ul style="margin-top:8px;margin-bottom:8px;padding-left:25px;">
+        ${selectedCauses.map(cause => `<li>${cause}</li>`).join('')}
+      </ul>
+      <div>Add additional documents below to complete your defense package.</div>
+    `;
+    content.appendChild(infoSection);
+
+    // Previews container
+    const previewContainer = document.createElement('div');
+    previewContainer.style.display = 'flex';
+    previewContainer.style.flexDirection = 'column';
+    previewContainer.style.gap = '10px';
+    
+    // First preview will be the cover page (already locked)
+    const coverPreview = document.createElement('div');
+    coverPreview.className = 'file-preview';
+    coverPreview.style.padding = '10px';
+    coverPreview.style.backgroundColor = '#f0f4ff';
+    coverPreview.style.borderRadius = '6px';
+    coverPreview.style.display = 'flex';
+    coverPreview.style.alignItems = 'center';
+    coverPreview.style.border = '1px solid #d0dcff';
+    
+    const coverIcon = document.createElement('div');
+    coverIcon.style.width = '40px';
+    coverIcon.style.height = '40px';
+    coverIcon.style.backgroundColor = '#3855e5';
+    coverIcon.style.borderRadius = '6px';
+    coverIcon.style.display = 'flex';
+    coverIcon.style.justifyContent = 'center';
+    coverIcon.style.alignItems = 'center';
+    coverIcon.style.marginRight = '10px';
+    coverIcon.style.flexShrink = '0';
+    coverIcon.innerHTML = '<svg fill="#fff" width="24" height="24" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zM16 18H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>';
+    
+    const coverInfo = document.createElement('div');
+    coverInfo.style.flex = '1';
+    coverInfo.style.minWidth = '0';
+    
+    const coverName = document.createElement('div');
+    coverName.textContent = 'Cover Page (Reasons)';
+    coverName.style.fontWeight = 'bold';
+    coverName.style.whiteSpace = 'nowrap';
+    coverName.style.overflow = 'hidden';
+    coverName.style.textOverflow = 'ellipsis';
+    
+    const coverDesc = document.createElement('div');
+    coverDesc.textContent = 'Automatically generated - Position locked';
+    coverDesc.style.fontSize = '12px';
+    coverDesc.style.color = '#666';
+    
+    coverInfo.appendChild(coverName);
+    coverInfo.appendChild(coverDesc);
+    
+    const coverLock = document.createElement('div');
+    coverLock.style.marginLeft = '10px';
+    coverLock.style.flexShrink = '0';
+    coverLock.innerHTML = '<svg fill="#999" width="16" height="16" viewBox="0 0 24 24"><path d="M12 2C8.14 2 5 5.14 5 9v2H4c-1.1 0-2 .9-2 2v7c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-7c0-1.1-.9-2-2-2h-1V9c0-3.86-3.14-7-7-7zm5 11h-1.5v5h-9v-5H5v-2h1V9c0-2.76 2.24-5 5-5s5 2.24 5 5v2h1v2z"/></svg>';
+    
+    coverPreview.appendChild(coverIcon);
+    coverPreview.appendChild(coverInfo);
+    coverPreview.appendChild(coverLock);
+    
+    previewContainer.appendChild(coverPreview);
+    
+    // Function to update the preview
+    function updatePreview() {
+      // Clear existing previews (except cover page)
+      while (previewContainer.children.length > 1) {
+        previewContainer.removeChild(previewContainer.lastChild);
+      }
+      
+      // Add each file preview
+      for (let i = 1; i < selectedFiles.length; i++) {
+        const file = selectedFiles[i];
+        
+        const previewDiv = document.createElement('div');
+        previewDiv.className = 'file-preview';
+        previewDiv.style.padding = '10px';
+        previewDiv.style.backgroundColor = '#f8f8f8';
+        previewDiv.style.borderRadius = '6px';
+        previewDiv.style.display = 'flex';
+        previewDiv.style.alignItems = 'center';
+        previewDiv.style.border = '1px solid #eee';
+        
+        // Icon based on type
+        const iconDiv = document.createElement('div');
+        iconDiv.style.width = '40px';
+        iconDiv.style.height = '40px';
+        iconDiv.style.borderRadius = '6px';
+        iconDiv.style.display = 'flex';
+        iconDiv.style.justifyContent = 'center';
+        iconDiv.style.alignItems = 'center';
+        iconDiv.style.marginRight = '10px';
+        iconDiv.style.flexShrink = '0';
+        
+        if (file.type === PDF_MIME) {
+          iconDiv.style.backgroundColor = '#e53935';
+          iconDiv.innerHTML = '<svg fill="#fff" width="24" height="24" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zM16 18H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>';
+        } else if (file.type.startsWith('image/')) {
+          iconDiv.style.backgroundColor = '#4CAF50';
+          iconDiv.innerHTML = '<svg fill="#fff" width="24" height="24" viewBox="0 0 24 24"><path d="M19 5v14H5V5h14m0-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7c0-1.1-.9-2-2-2zm-4.86 8.86l-3 3.87L9 13.14 6 17h12l-3.86-5.14z"/></svg>';
+        } else {
+          iconDiv.style.backgroundColor = '#9E9E9E';
+          iconDiv.innerHTML = '<svg fill="#fff" width="24" height="24" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-2 8c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm4 8H8v-.57c0-.81.48-1.53 1.22-1.85.85-.37 1.79-.58 2.78-.58.99 0 1.93.21 2.78.58.74.32 1.22 1.04 1.22 1.85V18z"/></svg>';
+        }
+        
+        // File info
+        const infoDiv = document.createElement('div');
+        infoDiv.style.flex = '1';
+        infoDiv.style.minWidth = '0';
+        
+        const nameDiv = document.createElement('div');
+        nameDiv.textContent = file.name;
+        nameDiv.style.fontWeight = 'bold';
+        nameDiv.style.whiteSpace = 'nowrap';
+        nameDiv.style.overflow = 'hidden';
+        nameDiv.style.textOverflow = 'ellipsis';
+        
+        const sizeDiv = document.createElement('div');
+        sizeDiv.textContent = formatFileSize(file.size);
+        sizeDiv.style.fontSize = '12px';
+        sizeDiv.style.color = '#666';
+        
+        infoDiv.appendChild(nameDiv);
+        infoDiv.appendChild(sizeDiv);
+        
+        // Actions
+        const actionsDiv = document.createElement('div');
+        actionsDiv.style.display = 'flex';
+        actionsDiv.style.gap = '5px';
+        
+        // Up button
+        const upBtn = document.createElement('button');
+        upBtn.innerHTML = '↑';
+        upBtn.style.border = 'none';
+        upBtn.style.backgroundColor = '#f0f0f0';
+        upBtn.style.width = '30px';
+        upBtn.style.height = '30px';
+        upBtn.style.borderRadius = '4px';
+        upBtn.style.cursor = 'pointer';
+        upBtn.title = 'Move up';
+        upBtn.disabled = i === 1; // Can't move up if it's right after cover page
+        if (upBtn.disabled) {
+          upBtn.style.opacity = '0.5';
+          upBtn.style.cursor = 'default';
+        }
+        upBtn.addEventListener('click', () => {
+          if (i > 1) { // Ensure it's not the first regular file
+            moveFile(i, -1);
+            updatePreview();
+          }
+        });
+        
+        // Down button
+        const downBtn = document.createElement('button');
+        downBtn.innerHTML = '↓';
+        downBtn.style.border = 'none';
+        downBtn.style.backgroundColor = '#f0f0f0';
+        downBtn.style.width = '30px';
+        downBtn.style.height = '30px';
+        downBtn.style.borderRadius = '4px';
+        downBtn.style.cursor = 'pointer';
+        downBtn.title = 'Move down';
+        downBtn.disabled = i === selectedFiles.length - 1;
+        if (downBtn.disabled) {
+          downBtn.style.opacity = '0.5';
+          downBtn.style.cursor = 'default';
+        }
+        downBtn.addEventListener('click', () => {
+          if (i < selectedFiles.length - 1) {
+            moveFile(i, 1);
+            updatePreview();
+          }
+        });
+        
+        // Remove button
+        const removeBtn = document.createElement('button');
+        removeBtn.innerHTML = '×';
+        removeBtn.style.border = 'none';
+        removeBtn.style.backgroundColor = '#ffebee';
+        removeBtn.style.color = '#e53935';
+        removeBtn.style.width = '30px';
+        removeBtn.style.height = '30px';
+        removeBtn.style.borderRadius = '4px';
+        removeBtn.style.cursor = 'pointer';
+        removeBtn.style.fontSize = '20px';
+        removeBtn.style.lineHeight = '0';
+        removeBtn.title = 'Remove';
+        removeBtn.addEventListener('click', () => {
+          removeFile(i);
+          updatePreview();
+        });
+        
+        actionsDiv.appendChild(upBtn);
+        actionsDiv.appendChild(downBtn);
+        actionsDiv.appendChild(removeBtn);
+        
+        previewDiv.appendChild(iconDiv);
+        previewDiv.appendChild(infoDiv);
+        previewDiv.appendChild(actionsDiv);
+        
+        previewContainer.appendChild(previewDiv);
+      }
+    }
+    
+    function formatFileSize(size) {
+      if (size < 1024) return size + ' B';
+      if (size < 1024 * 1024) return Math.round(size / 1024) + ' KB';
+      return Math.round(size / (1024 * 1024) * 10) / 10 + ' MB';
+    }
+    
+    function moveFile(index, direction) {
+      // Don't allow moving the cover page (index 0)
+      if (index === 0) return;
+      
+      const newIndex = index + direction;
+      // Don't allow moving files before cover page (index 0)
+      if (newIndex <= 0 || newIndex >= selectedFiles.length) return;
+      
+      const temp = selectedFiles[index];
+      selectedFiles[index] = selectedFiles[newIndex];
+      selectedFiles[newIndex] = temp;
+    }
+    
+    function removeFile(index) {
+      // Don't allow removing the cover page (index 0)
+      if (index === 0) return;
+      
+      selectedFiles.splice(index, 1);
+    }
+    
+    // File input
+    const fileInputContainer = document.createElement('div');
+    fileInputContainer.style.backgroundColor = '#f8f8f8';
+    fileInputContainer.style.padding = '15px';
+    fileInputContainer.style.borderRadius = '6px';
+    fileInputContainer.style.border = '2px dashed #ddd';
+    fileInputContainer.style.display = 'flex';
+    fileInputContainer.style.flexDirection = 'column';
+    fileInputContainer.style.alignItems = 'center';
+    fileInputContainer.style.justifyContent = 'center';
+    fileInputContainer.style.textAlign = 'center';
+    fileInputContainer.style.cursor = 'pointer';
+    
+    const fileIcon = document.createElement('div');
+    fileIcon.innerHTML = '<svg fill="#999" width="40" height="40" viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>';
+    
+    const fileText = document.createElement('div');
+    fileText.style.marginTop = '10px';
+    fileText.style.fontWeight = 'bold';
+    fileText.innerHTML = 'Click or drop files here<br><span style="font-weight:normal;font-size:12px;color:#666;">PDF, JPG, PNG, GIF accepted</span>';
+    
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.pdf,image/*';
+    fileInput.multiple = true;
+    fileInput.style.display = 'none';
+    
+    fileInputContainer.appendChild(fileIcon);
+    fileInputContainer.appendChild(fileText);
+    fileInputContainer.appendChild(fileInput);
+    
+    fileInputContainer.addEventListener('click', () => {
+      fileInput.click();
+    });
+    
+    // Handle file drop
+    fileInputContainer.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      fileInputContainer.style.backgroundColor = '#f0f0f0';
+      fileInputContainer.style.borderColor = '#aaa';
+    });
+    
+    fileInputContainer.addEventListener('dragleave', () => {
+      fileInputContainer.style.backgroundColor = '#f8f8f8';
+      fileInputContainer.style.borderColor = '#ddd';
+    });
+    
+    fileInputContainer.addEventListener('drop', (e) => {
+      e.preventDefault();
+      fileInputContainer.style.backgroundColor = '#f8f8f8';
+      fileInputContainer.style.borderColor = '#ddd';
+      
+      if (e.dataTransfer.files.length > 0) {
+        handleNewFiles(e.dataTransfer.files);
+      }
+    });
+    
+    function handleNewFiles(fileList) {
+      let added = 0;
+      
+      for (let i = 0; i < fileList.length; i++) {
+        const file = fileList[i];
+        
+        // Check if file type is accepted
+        if (file.type === PDF_MIME || IMAGE_MIME_TYPES.includes(file.type)) {
+          selectedFiles.push(file);
+          added++;
+        }
+      }
+      
+      if (added > 0) {
+        updatePreview();
+      }
+      
+      return added;
+    }
+    
+    // Add file input
+    fileInput.addEventListener('change', (e) => {
+      const added = handleNewFiles(e.target.files);
+      if (added > 0) {
+        // Scroll to show previews
+        previewContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+    
+    content.appendChild(previewContainer);
+    content.appendChild(fileInputContainer);
+    
+    // Footer with buttons
+    const footer = document.createElement('div');
+    footer.style.padding = '15px 20px';
+    footer.style.borderTop = '1px solid #eee';
+    footer.style.display = 'flex';
+    footer.style.justifyContent = 'flex-end';
+    footer.style.backgroundColor = '#f9f9f9';
+    
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.style.padding = '8px 16px';
+    cancelBtn.style.border = '1px solid #ddd';
+    cancelBtn.style.backgroundColor = '#f5f5f5';
+    cancelBtn.style.borderRadius = '4px';
+    cancelBtn.style.cursor = 'pointer';
+    cancelBtn.style.marginRight = '10px';
+    
+    const submitBtn = document.createElement('button');
+    submitBtn.textContent = 'Create Defense PDF';
+    submitBtn.style.padding = '8px 16px';
+    submitBtn.style.border = 'none';
+    submitBtn.style.backgroundColor = '#f44336';
+    submitBtn.style.color = '#fff';
+    submitBtn.style.borderRadius = '4px';
+    submitBtn.style.cursor = 'pointer';
+    submitBtn.style.fontWeight = 'bold';
+    
+    footer.appendChild(cancelBtn);
+    footer.appendChild(submitBtn);
+    
+    modal.appendChild(header);
+    modal.appendChild(content);
+    modal.appendChild(footer);
+    overlay.appendChild(modal);
+    
+    document.body.appendChild(overlay);
+    
+    // Initial preview update
+    updatePreview();
+    
+    // CLOSE
+    closeBtn.addEventListener('click', () => {
+      document.body.removeChild(overlay);
+    });
+    
+    // CANCEL
+    cancelBtn.addEventListener('click', () => {
+      document.body.removeChild(overlay);
+    });
+    
+    // SUBMIT => Merge & Download
+    submitBtn.addEventListener('click', async () => {
+      if (selectedFiles.length === 1) {
+        alert('Please add documents to your defense package!');
+        return;
+      }
+      
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Processing...';
+      
+      try {
+        // Convert each File => arrayBuffer (skip the first one, which is the cover page)
+        const filesInfo = [];
+        for (let i = 1; i < selectedFiles.length; i++) {
+          let file = selectedFiles[i];
+          let ab = await file.arrayBuffer();
+          filesInfo.push({ file, arrayBuffer: ab });
+        }
+        
+        // First, let's create an array buffer from the coverPageBytes
+        const coverPageArrayBuffer = await coverPageFile.arrayBuffer();
+        
+        // Merge all files with cover page
+        const mergedPdfBytes = await mergeDefenderFiles(coverPageArrayBuffer, filesInfo);
+        
+        // We'll rename the final PDF as "<RefNum>.pdf" or fallback to "defense_document.pdf"
+        const finalPdfName = (refNum ? refNum : 'defense_document') + '.pdf';
+        // 1) Create a Blob
+        const blob = new Blob([mergedPdfBytes], { type: PDF_MIME });
+        // 2) Download it
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = finalPdfName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        
+        // 3) Also attach it to composer
+        // We create a new File from the blob, with the same name
+        const pdfFile = new File([blob], finalPdfName, { type: PDF_MIME });
+        attachFileToComposer(pdfFile);
+        
+        // 4) Close modal
+        document.body.removeChild(overlay);
+      } catch (err) {
+        console.error('Error merging files:', err);
+        alert('Error merging files. Check console for details.');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Create Defense PDF';
+      }
+    });
+  }
 
 })();
