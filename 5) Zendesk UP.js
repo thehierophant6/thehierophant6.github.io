@@ -330,14 +330,36 @@
     "Reserva NR",
     "Retención"
   ];
+  
+  // English translations for cause names in the defense letter
+  const CAUSE_TRANSLATIONS = {
+    "Cargo – Daños": "Charge - Damages",
+    "Cargo - Asistencia": "Charge - Assistance",
+    "Cargo - Abandono": "Charge - Vehicle Abandonment",
+    "Cargo – Cancelación NR": "Charge - Non-Refundable Cancellation",
+    "Cargo – Limpieza": "Charge - Cleaning Fee",
+    "Cargo – Combustible": "Charge - Fuel",
+    "Cargo – Kilometraje": "Charge - Excess Mileage",
+    "Cargo – One Way": "Charge - One Way Fee",
+    "Cargo – Fumar": "Charge - Smoking Fee",
+    "Cargo – After Hours": "Charge - After Hours Service",
+    "Cargo – OPC/CAR": "Charge - Premium Coverage/Roadside Assistance",
+    "Cargo - Upselling": "Charge - Vehicle Upgrade",
+    "Reserva disfrutada": "Used Reservation",
+    "Reserva NR": "Non-Refundable Reservation",
+    "Retención": "Deposit Hold"
+  };
 
   // Create HTML templates for defender snippets
   function createHTMLSnippet(title, content) {
+    // Use English translation for title if available
+    const translatedTitle = CAUSE_TRANSLATIONS[title] || title;
+    
     // Base template with OK Mobility branding
     let htmlTemplate = `
     <div style="max-width:800px;margin:0 auto;background-color:#ffffff;padding:30px;font-family:'Nunito',Verdana,sans-serif;font-size:15px;line-height:1.6;color:#333;">
       <div style="text-align:left;margin-bottom:20px;">
-        <div style="display:inline-block;color:#3855e5;font-size:24px;font-weight:bold;">OK MOBILITY GROUP</div>
+        <div style="display:inline-block;color:#3855e5;font-size:24px;font-weight:bold;">OK Mobility</div>
       </div>
       <hr style="border:none;height:2px;background-color:#3855e5;margin:15px 0 25px;">
       
@@ -348,7 +370,7 @@
       
       <div style="background-color:#f8f9fa;border-left:4px solid #3855e5;padding:15px;margin-bottom:25px;">
         <div style="font-weight:bold;margin-bottom:8px;color:#3855e5;font-size:16px;">REASON FOR REJECTING THE CHARGEBACK:</div>
-        <div style="font-weight:bold;font-size:16px;">${title}</div>
+        <div style="font-weight:bold;font-size:16px;">${translatedTitle}</div>
       </div>
       
       <div class="content-area" style="margin-bottom:30px;">
@@ -356,7 +378,7 @@
       </div>
       
       <hr style="margin:30px 0;border:none;border-top:1px solid #eee;">
-      <div style="font-weight:bold;color:#3855e5;">OK Mobility Group</div>
+      <div style="font-weight:bold;color:#3855e5;">OK Mobility</div>
       <div><a href="https://www.okmobility.com" style="color:#3855e5;text-decoration:none;">www.okmobility.com</a></div>
     </div>
     `;
@@ -628,9 +650,9 @@ Please see the attached documentation, including the signed rental contract and 
     const panel = `
       <section style="margin-bottom:40px">
         ${selectedCauses.length > 1
-          ? `<h2 style="font-size:18px;margin:0 0 12px;color:#3855e5">Reason ${idx + 1}: ${cause}</h2>`
+          ? `<h2 style="font-size:18px;margin:0 0 12px;color:#3855e5">Reason ${idx + 1}: ${CAUSE_TRANSLATIONS[cause] || cause}</h2>`
           : ''}
-        ${DEFENDER_SNIPPETS_HTML[cause] || `<p>${cause}</p>`}
+        ${DEFENDER_SNIPPETS_HTML[cause] || `<p>${CAUSE_TRANSLATIONS[cause] || cause}</p>`}
       </section>`;
     body += panel;
   });
@@ -746,6 +768,367 @@ Please see the attached documentation, including the signed rental contract and 
       function cleanup() {
         document.body.removeChild(overlay);
       }
+    });
+  }
+  
+  /***********************************************************/
+  /*** 4b) PREVIEW AND EDIT DEFENSE LETTER                  ***/
+  function showDefenderPreviewModal(selectedCauses, refNum) {
+    return new Promise((resolve) => {
+      // Create a copy of the snippets for editing
+      const editableSnippets = {};
+      selectedCauses.forEach(cause => {
+        editableSnippets[cause] = DEFENDER_SNIPPETS[cause] || "";
+      });
+      
+      // Generate the initial HTML defense letter
+      const initialHtml = buildDefenderMessage(selectedCauses, true);
+      
+      // Create overlay
+      const overlay = document.createElement('div');
+      overlay.style.position = 'fixed';
+      overlay.style.top = '0';
+      overlay.style.left = '0';
+      overlay.style.width = '100%';
+      overlay.style.height = '100%';
+      overlay.style.backgroundColor = 'rgba(0,0,0,0.5)';
+      overlay.style.backdropFilter = 'blur(3px)';
+      overlay.style.zIndex = '9999';
+      overlay.style.display = 'flex';
+      overlay.style.justifyContent = 'center';
+      overlay.style.alignItems = 'center';
+      
+      // Create modal
+      const modal = document.createElement('div');
+      modal.style.backgroundColor = '#fff';
+      modal.style.borderRadius = '10px';
+      modal.style.boxShadow = '0 4px 20px rgba(0,0,0,0.2)';
+      modal.style.width = '90%';
+      modal.style.maxWidth = '1200px';
+      modal.style.height = '90vh';
+      modal.style.maxHeight = '900px';
+      modal.style.display = 'flex';
+      modal.style.flexDirection = 'column';
+      modal.style.overflow = 'hidden';
+      
+      // Header
+      const header = document.createElement('div');
+      header.style.backgroundColor = '#3855e5';
+      header.style.color = 'white';
+      header.style.padding = '15px 20px';
+      header.style.display = 'flex';
+      header.style.alignItems = 'center';
+      header.style.justifyContent = 'space-between';
+      
+      const title = document.createElement('h2');
+      title.textContent = 'Preview & Edit Defense Letter';
+      title.style.margin = '0';
+      title.style.fontSize = '18px';
+      
+      const closeBtn = document.createElement('button');
+      closeBtn.innerHTML = '×';
+      closeBtn.style.backgroundColor = 'transparent';
+      closeBtn.style.border = 'none';
+      closeBtn.style.color = 'white';
+      closeBtn.style.fontSize = '24px';
+      closeBtn.style.cursor = 'pointer';
+      closeBtn.style.padding = '0 5px';
+      closeBtn.style.lineHeight = '1';
+      
+      header.appendChild(title);
+      header.appendChild(closeBtn);
+      
+      // Content
+      const content = document.createElement('div');
+      content.style.display = 'flex';
+      content.style.flexGrow = '1';
+      content.style.overflow = 'hidden';
+      
+      // Left panel (preview)
+      const previewPanel = document.createElement('div');
+      previewPanel.style.width = '50%';
+      previewPanel.style.padding = '20px';
+      previewPanel.style.overflow = 'auto';
+      previewPanel.style.borderRight = '1px solid #eee';
+      
+      const previewTitle = document.createElement('h3');
+      previewTitle.textContent = 'Preview';
+      previewTitle.style.marginTop = '0';
+      previewTitle.style.color = '#3855e5';
+      
+      const previewFrame = document.createElement('iframe');
+      previewFrame.style.width = '100%';
+      previewFrame.style.height = 'calc(100% - 40px)';
+      previewFrame.style.border = '1px solid #eee';
+      previewFrame.style.borderRadius = '5px';
+      
+      previewPanel.appendChild(previewTitle);
+      previewPanel.appendChild(previewFrame);
+      
+      // Right panel (edit)
+      const editPanel = document.createElement('div');
+      editPanel.style.width = '50%';
+      editPanel.style.padding = '20px';
+      editPanel.style.overflow = 'auto';
+      
+      const editTitle = document.createElement('h3');
+      editTitle.textContent = 'Edit Content';
+      editTitle.style.marginTop = '0';
+      editTitle.style.color = '#3855e5';
+      
+      // Create tabs for each cause
+      const tabsContainer = document.createElement('div');
+      tabsContainer.style.display = 'flex';
+      tabsContainer.style.borderBottom = '1px solid #ddd';
+      tabsContainer.style.marginBottom = '15px';
+      tabsContainer.style.overflowX = 'auto';
+      tabsContainer.style.whiteSpace = 'nowrap';
+      
+      const tabs = {};
+      selectedCauses.forEach((cause, index) => {
+        const tab = document.createElement('button');
+        tab.textContent = CAUSE_TRANSLATIONS[cause] || cause;
+        tab.style.padding = '8px 15px';
+        tab.style.background = index === 0 ? '#f5f8ff' : 'transparent';
+        tab.style.border = 'none';
+        tab.style.borderBottom = index === 0 ? '3px solid #3855e5' : '3px solid transparent';
+        tab.style.cursor = 'pointer';
+        tab.style.fontSize = '14px';
+        tab.style.color = index === 0 ? '#3855e5' : '#555';
+        tab.style.fontWeight = index === 0 ? 'bold' : 'normal';
+        tab.dataset.cause = cause;
+        
+        tabs[cause] = tab;
+        tabsContainer.appendChild(tab);
+      });
+      
+      // Editor container
+      const editorContainer = document.createElement('div');
+      editorContainer.style.height = 'calc(100% - 80px)';
+      
+      // Create the textarea
+      const editor = document.createElement('textarea');
+      editor.style.width = '100%';
+      editor.style.height = '100%';
+      editor.style.padding = '15px';
+      editor.style.border = '1px solid #ddd';
+      editor.style.borderRadius = '5px';
+      editor.style.fontFamily = 'Consolas, monospace';
+      editor.style.fontSize = '14px';
+      editor.style.lineHeight = '1.5';
+      editor.style.resize = 'none';
+      editor.dataset.currentCause = selectedCauses[0]; // Set initial cause
+      
+      // Set initial content
+      editor.value = editableSnippets[selectedCauses[0]] || '';
+      
+      // Add email design note
+      const designNote = document.createElement('div');
+      designNote.style.marginTop = '10px';
+      designNote.style.fontSize = '12px';
+      designNote.style.color = '#666';
+      designNote.style.backgroundColor = '#f8f8f8';
+      designNote.style.padding = '8px';
+      designNote.style.borderRadius = '4px';
+      designNote.innerHTML = `
+        <strong>Formatting tips:</strong><br>
+        • Use numbered points with a period: <code>1. Section Title</code><br>
+        • Use arrow bullets: <code>-&gt; Bullet point</code><br>
+        • Paragraphs are automatically formatted<br>
+        • Line breaks create new paragraphs
+      `;
+      
+      editorContainer.appendChild(editor);
+      
+      editPanel.appendChild(editTitle);
+      editPanel.appendChild(tabsContainer);
+      editPanel.appendChild(editorContainer);
+      editPanel.appendChild(designNote);
+      
+      content.appendChild(previewPanel);
+      content.appendChild(editPanel);
+      
+      // Footer
+      const footer = document.createElement('div');
+      footer.style.padding = '15px 20px';
+      footer.style.borderTop = '1px solid #eee';
+      footer.style.display = 'flex';
+      footer.style.justifyContent = 'flex-end';
+      
+      const cancelButton = document.createElement('button');
+      cancelButton.textContent = 'Cancel';
+      cancelButton.style.padding = '10px 15px';
+      cancelButton.style.backgroundColor = '#f5f5f5';
+      cancelButton.style.border = '1px solid #ddd';
+      cancelButton.style.borderRadius = '4px';
+      cancelButton.style.marginRight = '10px';
+      cancelButton.style.cursor = 'pointer';
+      
+      const saveButton = document.createElement('button');
+      saveButton.textContent = 'Save & Continue';
+      saveButton.style.padding = '10px 20px';
+      saveButton.style.backgroundColor = '#3855e5';
+      saveButton.style.color = 'white';
+      saveButton.style.border = 'none';
+      saveButton.style.borderRadius = '4px';
+      saveButton.style.cursor = 'pointer';
+      saveButton.style.fontWeight = 'bold';
+      
+      footer.appendChild(cancelButton);
+      footer.appendChild(saveButton);
+      
+      // Assemble modal
+      modal.appendChild(header);
+      modal.appendChild(content);
+      modal.appendChild(footer);
+      overlay.appendChild(modal);
+      document.body.appendChild(overlay);
+      
+      // Update preview function
+      function updatePreview() {
+        const currentCause = editor.dataset.currentCause;
+        // Update the current snippet
+        editableSnippets[currentCause] = editor.value;
+        
+        // Regenerate the HTML with updated snippets
+        const customSnippets = {...DEFENDER_SNIPPETS};
+        for (const cause in editableSnippets) {
+          customSnippets[cause] = editableSnippets[cause];
+        }
+        
+        const customBuildDefenderMessage = (causes) => {
+          const header = `
+          <div style="font-family:'Nunito',Verdana,sans-serif;max-width:850px;margin:0 auto">
+            <header style="background:#3855e5;background:linear-gradient(90deg,#3855e5 0%,#4f6bff 100%);
+                           color:#fff;padding:24px 32px;border-radius:12px 12px 0 0">
+              <h1 style="margin:0;font-size:28px;letter-spacing:.5px">OK Mobility</h1>
+              <p style="margin:6px 0 0;font-size:15px;opacity:.9">Chargeback defence documentation</p>
+              <p style="margin:2px 0 0;font-size:13px;opacity:.8">${new Date()
+                .toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}</p>
+            </header>
+            <main style="background:#fff;border:1px solid #e2e8ff;border-top:0;padding:32px;border-radius:0 0 12px 12px">
+              <p style="font-size:16px">Dear Partner,</p>
+              <p style="margin:12px 0 24px 0">Thanks for your e-mail.</p>
+              <p style="font-size:17px;font-weight:700;color:#e02b2b;margin:0 0 24px">
+                We do not accept the proposed chargeback.
+              </p>
+              <p style="margin:0 0 32px">Please find below and attached the documentation with our reasons for defending this case.</p>`;
+
+          const footer = `
+              <p style="margin:40px 0 0 0">Kind regards,</p>
+            </main>
+          </div>`;
+
+          let body = '';
+          causes.forEach((cause, idx) => {
+            // Generate HTML snippet with custom content
+            const customContent = processContent(customSnippets[cause]);
+            const translatedTitle = CAUSE_TRANSLATIONS[cause] || cause;
+            
+            const snippetHtml = `
+            <div style="max-width:800px;margin:0 auto;background-color:#ffffff;font-family:'Nunito',Verdana,sans-serif;font-size:15px;line-height:1.6;color:#333;">
+              <div style="margin-bottom:30px;">
+                ${causes.length > 1 ? `
+                <div style="background-color:#f8f9fa;border-left:4px solid #3855e5;padding:15px;margin-bottom:15px;">
+                  <div style="font-weight:bold;font-size:16px;">Reason ${idx + 1}: ${translatedTitle}</div>
+                </div>` : ''}
+                <div class="content-area">
+                  ${customContent}
+                </div>
+              </div>
+            </div>`;
+            
+            const panel = `
+              <section style="margin-bottom:40px">
+                ${snippetHtml}
+              </section>`;
+            body += panel;
+          });
+
+          return header + body + footer;
+        };
+        
+        // Generate the custom HTML
+        const customHtml = customBuildDefenderMessage(selectedCauses);
+        
+        // Update iframe content
+        const iframe = previewFrame;
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+        iframeDoc.open();
+        iframeDoc.write(customHtml);
+        iframeDoc.close();
+      }
+      
+      // Initialize preview
+      setTimeout(updatePreview, 100); // Small delay to ensure iframe is ready
+      
+      // Tab switching
+      Object.keys(tabs).forEach(cause => {
+        tabs[cause].addEventListener('click', () => {
+          // Save current content
+          const currentCause = editor.dataset.currentCause;
+          editableSnippets[currentCause] = editor.value;
+          
+          // Update active tab
+          Object.values(tabs).forEach(t => {
+            t.style.background = 'transparent';
+            t.style.borderBottom = '3px solid transparent';
+            t.style.fontWeight = 'normal';
+            t.style.color = '#555';
+          });
+          
+          tabs[cause].style.background = '#f5f8ff';
+          tabs[cause].style.borderBottom = '3px solid #3855e5';
+          tabs[cause].style.fontWeight = 'bold';
+          tabs[cause].style.color = '#3855e5';
+          
+          // Update editor content
+          editor.dataset.currentCause = cause;
+          editor.value = editableSnippets[cause];
+          
+          // Update preview
+          updatePreview();
+        });
+      });
+      
+      // Editor input handler
+      editor.addEventListener('input', () => {
+        // Update the current snippet
+        const currentCause = editor.dataset.currentCause;
+        editableSnippets[currentCause] = editor.value;
+        
+        // Update preview after a short delay (debounce)
+        clearTimeout(editor.updateTimeout);
+        editor.updateTimeout = setTimeout(updatePreview, 300);
+      });
+      
+      // Cancel button handler
+      cancelButton.addEventListener('click', () => {
+        document.body.removeChild(overlay);
+        resolve(null);
+      });
+      
+      // Close button handler
+      closeBtn.addEventListener('click', () => {
+        document.body.removeChild(overlay);
+        resolve(null);
+      });
+      
+      // Save button handler
+      saveButton.addEventListener('click', () => {
+        // Save current content
+        const currentCause = editor.dataset.currentCause;
+        editableSnippets[currentCause] = editor.value;
+        
+        // Generate custom HTML for email
+        const customHtml = buildDefenderMessage(selectedCauses, true);
+        
+        document.body.removeChild(overlay);
+        resolve({
+          snippets: editableSnippets,
+          emailHTML: customHtml
+        });
+      });
     });
   }
 
@@ -1702,8 +2085,15 @@ Please see the attached documentation, including the signed rental contract and 
       }
       setTextFieldByLabel(TIPOLOGIA_LABEL, chosen[0]);
       
-      // Set the reply text immediately (this should work regardless of PDF generation)
-      setReplyText(DEFENDER_TEXT_HTML, true);
+      // Step 2: Preview and edit the defense letter
+      const editedContent = await showDefenderPreviewModal(chosen, refNum);
+      if (!editedContent) {
+        // User canceled the preview/edit
+        return;
+      }
+      
+      // Set the reply text with either the edited content or default template
+      setReplyText(editedContent.emailHTML || DEFENDER_TEXT_HTML, true);
       
       // First make sure PDF-lib is available
       try {
@@ -1713,9 +2103,9 @@ Please see the attached documentation, including the signed rental contract and 
         }
         console.log("PDF library confirmed available");
         
-        // Step 2: Generate cover page and open document selection modal
+        // Step 3: Generate cover page and open document selection modal
         console.log("Generating cover page...");
-        const coverPageBytes = await generateDefenderCoverPage(chosen);
+        const coverPageBytes = await generateDefenderCoverPage(chosen, editedContent.snippets);
         console.log("Cover page generated successfully");
         
         // Open unified file selection modal with cover page already included
@@ -2205,8 +2595,9 @@ Please see the attached documentation, including the signed rental contract and 
             font: Nunito
           });
           
-          // Draw cause text
-          page.drawText(cause, {
+          // Draw cause text in English
+          const translatedCause = CAUSE_TRANSLATIONS[cause] || cause;
+          page.drawText(translatedCause, {
             x: margin + 15,
             y,
             size: 12,
@@ -2217,23 +2608,63 @@ Please see the attached documentation, including the signed rental contract and 
           
           // Draw full text of each snippet instead of just summary
           const snippetLines = SNIPPET_LINES[cause] || [];
-          const lineHeight = 13;
+          const lineHeight = 14; // Increased line height for better readability
+          const paragraphSpacing = 10; // More space between paragraphs
           const maxWidth = pageWidth - margin * 2;
-          page.setFont(Nunito);
-          page.setFontSize(11);
+          let isBold = false;
+          let isNumberedPoint = false;
           
           snippetLines.forEach(txt => {
+            const trimmedText = txt.trim();
+            
+            // Skip empty lines but add some space
+            if (!trimmedText) {
+              y -= paragraphSpacing/2;
+              return;
+            }
+            
+            // Check if this is a numbered point (1., 2., etc.)
+            isNumberedPoint = /^\d+\./.test(trimmedText);
+            
+            // Check if this is a heading or section title that should be bold
+            // Assumes section points or things like "Customer's Agreement" should be bold
+            isBold = isNumberedPoint || 
+                    /^[A-Z].*:$/.test(trimmedText) || // Capitalized text ending with colon
+                    /(Policy|Terms|Agreement|Documentation|Obligations|Evidence|Explicit|Responsibility|Policy|Findings)/.test(trimmedText);
+            
+            // Add extra spacing before numbered points or important sections
+            if (isNumberedPoint) {
+              y -= paragraphSpacing; // Extra space before numbered sections
+              page.setFont(isBold ? Nunito : Nunito);
+              page.setFontSize(12); // Slightly larger font for section headings
+            } else {
+              page.setFont(isBold ? Nunito : Nunito);
+              page.setFontSize(11);
+            }
+            
+            // Indent arrows/bullet points
+            const indent = trimmedText.startsWith('->') ? 15 : 0;
+            
             // word-wrap each paragraph
-            const words = txt.trim().split(' ');
+            const words = trimmedText.split(' ');
             let line = '';
             words.forEach(word => {
               if (y < margin + 40) {               // 40 pt bottom safety zone
-                page = pdfDoc.addPage();
+                page = pdfDoc.addPage([pageWidth, pageHeight]);
                 y = page.getHeight() - margin;
               }
               
-              if (Nunito.widthOfTextAtSize(line + word, 11) > maxWidth) {
-                page.drawText(line, { x: margin, y, size: 11, font: Nunito });
+              const currentFont = isBold ? Nunito : Nunito;
+              const currentSize = isNumberedPoint ? 12 : 11;
+              
+              if (currentFont.widthOfTextAtSize(line + word, currentSize) > maxWidth - indent) {
+                page.drawText(line, { 
+                  x: margin + indent, 
+                  y, 
+                  size: currentSize, 
+                  font: currentFont,
+                  color: isNumberedPoint ? okBlue : rgb(0, 0, 0)
+                });
                 y -= lineHeight;
                 line = '';
               }
@@ -2242,14 +2673,25 @@ Please see the attached documentation, including the signed rental contract and 
             
             if (line) {
               if (y < margin + 40) {               // 40 pt bottom safety zone
-                page = pdfDoc.addPage();
+                page = pdfDoc.addPage([pageWidth, pageHeight]);
                 y = page.getHeight() - margin;
               }
-              page.drawText(line.trim(), { x: margin, y, size: 11, font: Nunito });
+              page.drawText(line.trim(), { 
+                x: margin + indent, 
+                y, 
+                size: isNumberedPoint ? 12 : 11, 
+                font: isBold ? Nunito : Nunito,
+                color: isNumberedPoint ? okBlue : rgb(0, 0, 0)
+              });
               y -= lineHeight;
             }
             
-            y -= 4;                       // extra spacing between paragraphs
+            // Arrows/bullets get less paragraph spacing
+            if (trimmedText.startsWith('->')) {
+              y -= lineHeight - 4; // Less spacing after bullet points
+            } else {
+              y -= paragraphSpacing; // More spacing between regular paragraphs
+            }
           });
           
           // Add extra spacing between causes
