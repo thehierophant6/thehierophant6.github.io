@@ -575,6 +575,11 @@ Please see the attached documentation, including the signed rental contract and 
   };
   
   // HTML versions of defender snippets
+  // Helper that converts snippets to plain arrays of lines
+  const SNIPPET_LINES = Object.fromEntries(
+    Object.entries(DEFENDER_SNIPPETS).map(([k,v]) => [k, v.split(/\r?\n/)])
+  );
+
   const DEFENDER_SNIPPETS_HTML = {};
   
   // Convert all snippets to HTML
@@ -599,7 +604,7 @@ Please see the attached documentation, including the signed rental contract and 
   <div style="font-family:'Nunito',Verdana,sans-serif;max-width:850px;margin:0 auto">
     <header style="background:#3855e5;background:linear-gradient(90deg,#3855e5 0%,#4f6bff 100%);
                    color:#fff;padding:24px 32px;border-radius:12px 12px 0 0">
-      <h1 style="margin:0;font-size:28px;letter-spacing:.5px">OK Mobility Group</h1>
+      <h1 style="margin:0;font-size:28px;letter-spacing:.5px">OK Mobility</h1>
       <p style="margin:6px 0 0;font-size:15px;opacity:.9">Chargeback defence documentation</p>
       <p style="margin:2px 0 0;font-size:13px;opacity:.8">${new Date()
         .toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}</p>
@@ -2086,14 +2091,28 @@ Please see the attached documentation, including the signed rental contract and 
       
       // Add a blank page (A4 size)
       console.log("generateDefenderCoverPage: Adding page");
-      const page = pdfDoc.addPage([595, 842]);
+      const pageWidth = 595;
+      const pageHeight = 842;
+      const page = pdfDoc.addPage([pageWidth, pageHeight]);
       
       // Get fonts
       console.log("generateDefenderCoverPage: Embedding fonts");
-      let helveticaBold, helvetica;
+      let helveticaBold, helvetica, Nunito;
       try {
         helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
         helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
+        
+        // Try to embed Nunito font
+        try {
+          const nunitoBytes = await fetch('https://fonts.gstatic.com/s/nunito/v25/XRXV3I6Li01BKofINeaBTMnFcQ.ttf')
+            .then(r => r.arrayBuffer());
+          Nunito = await pdfDoc.embedFont(nunitoBytes);
+          console.log("Nunito font loaded successfully");
+        } catch (nunitoErr) {
+          console.warn("Could not load Nunito font:", nunitoErr);
+          // Fallback to Helvetica
+          Nunito = helvetica;
+        }
       } catch (fontErr) {
         console.error("Error embedding fonts:", fontErr);
         throw new Error("Failed to embed PDF fonts: " + fontErr.message);
@@ -2103,44 +2122,43 @@ Please see the attached documentation, including the signed rental contract and 
       const okBlue = rgb(56/255, 85/255, 229/255); // #3855e5
       
       // Define margins
-      const margin = 50;
-      const width = page.getWidth() - 2 * margin;
+      const margin = 36; // 1/2 inch margin
+      const width = pageWidth - 2 * margin;
       
       // Current y-position (start from top)
-      let y = page.getHeight() - margin;
+      let y = pageHeight - margin;
 
       console.log("generateDefenderCoverPage: Drawing content");
       try {
+        // Draw a blue header bar like CAR-en.html
+        page.drawRectangle({ 
+          x: 0, 
+          y: pageHeight - 45, 
+          width: pageWidth, 
+          height: 45,
+          color: okBlue 
+        });
+        
         // Add title
-        page.drawText("OK MOBILITY GROUP", {
+        page.drawText("OK Mobility", {
           x: margin,
-          y: y,
-          size: 24,
-          font: helveticaBold,
-          color: okBlue
+          y: pageHeight - 30,
+          size: 20,
+          font: Nunito,
+          color: rgb(1, 1, 1) // White
         });
         
-        y -= 15;
-        
-        // Add horizontal line
-        page.drawLine({
-          start: { x: margin, y },
-          end: { x: page.getWidth() - margin, y },
-          thickness: 2,
-          color: okBlue
-        });
-        
-        y -= 40;
+        y = pageHeight - 45 - 40; // Position after blue bar with some spacing
         
         // Add document title
         page.drawText("CHARGEBACK DEFENSE DOCUMENTATION", {
           x: margin,
           y,
           size: 18,
-          font: helveticaBold
+          font: Nunito
         });
         
-        y -= 40;
+        y -= 30;
         
         // Add current date
         const today = new Date();
@@ -2153,8 +2171,8 @@ Please see the attached documentation, including the signed rental contract and 
         page.drawText(`Date: ${dateStr}`, {
           x: margin,
           y,
-          size: 12,
-          font: helvetica
+          size: 11,
+          font: Nunito
         });
         
         y -= 40;
@@ -2164,7 +2182,7 @@ Please see the attached documentation, including the signed rental contract and 
           x: margin,
           y,
           size: 14,
-          font: helveticaBold,
+          font: Nunito,
           color: okBlue
         });
         
@@ -2175,8 +2193,8 @@ Please see the attached documentation, including the signed rental contract and 
           // Calculate if text will fit on current page
           if (y < margin + 100) {
             // Add a new page if we're running out of space
-            page = pdfDoc.addPage([595, 842]);
-            y = page.getHeight() - margin;
+            page = pdfDoc.addPage([pageWidth, pageHeight]);
+            y = pageHeight - margin;
           }
           
           // Draw bullet point
@@ -2184,7 +2202,7 @@ Please see the attached documentation, including the signed rental contract and 
             x: margin,
             y,
             size: 12,
-            font: helvetica
+            font: Nunito
           });
           
           // Draw cause text
@@ -2192,51 +2210,47 @@ Please see the attached documentation, including the signed rental contract and 
             x: margin + 15,
             y,
             size: 12,
-            font: helveticaBold
+            font: Nunito
           });
           
           y -= 20;
           
-          // Add explanation text based on the cause (reuse snippets)
-          const snippet = DEFENDER_SNIPPETS[cause] || "";
-          // Extract first paragraph/sentence as summary
-          const summary = snippet.split('\n')[0]?.substring(0, 120) + "...";
+          // Draw full text of each snippet instead of just summary
+          const snippetLines = SNIPPET_LINES[cause] || [];
+          const lineHeight = 13;
+          const maxWidth = pageWidth - margin * 2;
+          page.setFont(Nunito);
+          page.setFontSize(11);
           
-          if (summary && summary.length > 3) {
-            // Word wrap the summary to fit the page width
-            const words = summary.split(' ');
+          snippetLines.forEach(txt => {
+            // word-wrap each paragraph
+            const words = txt.trim().split(' ');
             let line = '';
-            
-            for (let word of words) {
-              const testLine = line + word + ' ';
-              const textWidth = helvetica.widthOfTextAtSize(testLine, 10);
-              
-              if (textWidth > width - 15) {
-                // Draw the current line
-                page.drawText(line, {
-                  x: margin + 15,
-                  y,
-                  size: 10,
-                  font: helvetica
-                });
-                y -= 15;
-                line = word + ' ';
-              } else {
-                line = testLine;
+            words.forEach(word => {
+              if (y < margin + 40) {               // 40 pt bottom safety zone
+                page = pdfDoc.addPage();
+                y = page.getHeight() - margin;
               }
+              
+              if (Nunito.widthOfTextAtSize(line + word, 11) > maxWidth) {
+                page.drawText(line, { x: margin, y, size: 11, font: Nunito });
+                y -= lineHeight;
+                line = '';
+              }
+              line += word + ' ';
+            });
+            
+            if (line) {
+              if (y < margin + 40) {               // 40 pt bottom safety zone
+                page = pdfDoc.addPage();
+                y = page.getHeight() - margin;
+              }
+              page.drawText(line.trim(), { x: margin, y, size: 11, font: Nunito });
+              y -= lineHeight;
             }
             
-            // Draw the remaining text
-            if (line.trim()) {
-              page.drawText(line, {
-                x: margin + 15,
-                y,
-                size: 10,
-                font: helvetica
-              });
-              y -= 20;
-            }
-          }
+            y -= 4;                       // extra spacing between paragraphs
+          });
           
           // Add extra spacing between causes
           y -= 10;
@@ -2256,11 +2270,11 @@ Please see the attached documentation, including the signed rental contract and 
         y -= 25;
         
         // Add footer text
-        page.drawText("OK Mobility Group", {
+        page.drawText("OK Mobility", {
           x: margin,
           y,
           size: 10,
-          font: helveticaBold
+          font: Nunito
         });
         
         y -= 15;
@@ -2269,7 +2283,7 @@ Please see the attached documentation, including the signed rental contract and 
           x: margin,
           y,
           size: 10,
-          font: helvetica,
+          font: Nunito,
           color: okBlue
         });
       } catch (drawErr) {
