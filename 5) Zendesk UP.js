@@ -1,16 +1,149 @@
 // ==UserScript==
 // @name         Zendesk UP with ARCHIVOS (Rename + Auto-Attach)
 // @namespace    https://your-namespace.example
-// @version      1.0
+// @version      1.1
 // @description  "UP" button for Zendesk. Merges PDFs/images, renames the file to the reference #, downloads, and auto-attaches to composer by simulating a drag/drop event.
 // @match        https://okmobility.zendesk.com/*
 // @grant        unsafeWindow
-// @require      https://cdn.jsdelivr.net/npm/pdf-lib/dist/pdf-lib.min.js
+// @grant        GM_xmlhttpRequest
+// @grant        GM_addElement
+// @connect      cdn.jsdelivr.net
+// @require      https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js
 // ==/UserScript==
 
 (function() {
   'use strict';
 
+  // First, ensure the PDF-lib is available or load it manually
+  const ensurePDFLibIsLoaded = async function() {
+    return new Promise((resolve, reject) => {
+      // Maximum retries for loading the library
+      const MAX_RETRIES = 3;
+      let attempts = 0;
+      
+      function checkAndLoad() {
+        attempts++;
+        console.log(`PDFLib load attempt ${attempts}/${MAX_RETRIES}`);
+        
+        if (window.PDFLib && window.PDFLib.PDFDocument) {
+          console.log("PDFLib already available, using existing library");
+          return resolve(window.PDFLib);
+        }
+        
+        if (attempts >= MAX_RETRIES) {
+          console.error("PDFLib not loaded after multiple attempts");
+          return reject(new Error("PDFLib not loaded after multiple attempts. Check if the library is properly included."));
+        }
+        
+        console.log("PDFLib not found, attempting to load it manually");
+        
+        try {
+          // Try to load using GM_addElement if available (Tampermonkey/Violentmonkey)
+          if (typeof GM_addElement === 'function') {
+            console.log("Loading PDFLib using GM_addElement");
+            GM_addElement('script', {
+              src: 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js',
+              onload: function() {
+                console.log("PDFLib loaded via GM_addElement");
+                // Check after a short delay to ensure library is initialized
+                setTimeout(() => {
+                  if (window.PDFLib && window.PDFLib.PDFDocument) {
+                    resolve(window.PDFLib);
+                  } else {
+                    // Retry if not loaded correctly
+                    setTimeout(checkAndLoad, 500);
+                  }
+                }, 100);
+              },
+              onerror: function(e) {
+                console.error("Failed to load PDFLib via GM_addElement:", e);
+                // Retry with alternate method
+                setTimeout(checkAndLoad, 500);
+              }
+            });
+            return; // Wait for callbacks
+          }
+          
+          // Fallback to standard script injection
+          const script = document.createElement('script');
+          script.src = 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js';
+          script.async = true;
+          script.onload = function() {
+            console.log("PDFLib loaded manually via script tag");
+            // Check after a short delay to ensure library is initialized
+            setTimeout(() => {
+              if (window.PDFLib && window.PDFLib.PDFDocument) {
+                resolve(window.PDFLib);
+              } else {
+                // Retry if not loaded correctly
+                setTimeout(checkAndLoad, 500);
+              }
+            }, 100);
+          };
+          script.onerror = function(e) {
+            console.error("Failed to load PDFLib manually:", e);
+            // Retry
+            setTimeout(checkAndLoad, 500);
+          };
+          document.head.appendChild(script);
+        } catch (error) {
+          console.error("Error during PDFLib loading attempt:", error);
+          // Retry
+          setTimeout(checkAndLoad, 500);
+        }
+      }
+      
+      // Start the loading process
+      checkAndLoad();
+    });
+  };
+
+  // Attempt to load the library immediately
+  ensurePDFLibIsLoaded().then(lib => {
+    console.log("PDFLib confirmed available at script initialization");
+  }).catch(err => {
+    console.error("Initial PDFLib loading failed:", err);
+  });
+  
+  // Check if PDF library is functional - used to determine if we should offer PDF features
+  function isPDFLibAvailable() {
+    return Boolean(window.PDFLib && window.PDFLib.PDFDocument);
+  }
+  
+  // Simplified function to wait for PDFLib
+  async function waitForPDFLib() {
+    console.log('Waiting for PDFLib to load...');
+    try {
+      const pdfLib = await ensurePDFLibIsLoaded();
+      console.log('PDFLib loaded successfully');
+      if (!pdfLib || !pdfLib.PDFDocument) {
+        throw new Error('PDFLib loaded but PDFDocument is not available');
+      }
+      return pdfLib;
+    } catch (err) {
+      console.error('Error loading PDFLib:', err);
+      throw new Error('Failed to load PDF library: ' + err.message);
+    }
+  }
+  
+  // New function to generate a simple defender cover page when PDF generation fails
+  function createSimpleTextCoverPage(selectedCauses) {
+    // Return a simple text document with the causes
+    let text = 'CHARGEBACK DEFENSE DOCUMENTATION\n\n';
+    text += 'Date: ' + new Date().toLocaleDateString() + '\n\n';
+    text += 'REASONS FOR REJECTING THE CHARGEBACK:\n\n';
+    
+    selectedCauses.forEach(cause => {
+      text += '• ' + cause + '\n';
+    });
+    
+    text += '\nOK Mobility Group\nwww.okmobility.com';
+    
+    // Create a simple text file as a fallback
+    const blob = new Blob([text], { type: 'text/plain' });
+    return new File([blob], 'defense_reasons.txt', { type: 'text/plain' });
+  }
+  
   /***************************************************************/
   /*** 1) SUBJECT & FIELDS: "UP - Referencia" / "Tipología"    ***/
   /***************************************************************/
@@ -599,26 +732,15 @@ Please see the attached documentation, including the signed rental contract and 
 
   // Wait for pdf-lib
   async function waitForPDFLib() {
-    return new Promise((resolve, reject) => {
-      let attempts = 0;
-      const maxAttempts = 50; // 5 seconds total (50 * 100ms)
-      
-      const check = () => {
-        attempts++;
-        console.log(`Checking for PDFLib (attempt ${attempts}/${maxAttempts})...`);
-        
-        if (window.PDFLib && window.PDFLib.PDFDocument) {
-          console.log('PDFLib found!');
-          resolve();
-        } else if (attempts >= maxAttempts) {
-          reject(new Error('PDFLib not loaded after multiple attempts. Check if the library is properly included.'));
-        } else {
-          setTimeout(check, 100);
-        }
-      };
-      
-      check();
-    });
+    try {
+      console.log('Waiting for PDFLib to load...');
+      await ensurePDFLibIsLoaded();
+      console.log('PDFLib loaded successfully');
+      return;
+    } catch (err) {
+      console.error('Error loading PDFLib:', err);
+      throw new Error('Failed to load PDF library. Please try again or check console for details.');
+    }
   }
 
   async function mergeFilesIntoPDF(filesInfo) {
@@ -971,7 +1093,7 @@ Please see the attached documentation, including the signed rental contract and 
         
         if (file.type === PDF_MIME) {
           // PDF placeholder
-          thumb.src = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj48cGF0aCBmaWxsPSIjZTJlNWU3IiBkPSJNMTI4IDBjLTE3LjYgMC0zMiAxNC40LTMyIDMydjQ0OGMwIDE3LjYgMTQuNCAzMiAzMiAzMmgyNTZjMTcuNiAwIDMyLTE0LjQgMzItMzJWMTI4TDMwNCAwSDEyOHoiLz48cGF0aCBmaWxsPSIjYjVjM2QxIiBkPSJNMzg0IDEyOGgtODBjLTE3LjYgMC0zMi0xNC40LTMyLTMyVjBsODAgNzJoMzJ2NTZaIi8+PHBhdGggZmlsbD0iI2Y0NDMzNiIgZD0iTTM4NCAyNTZIMTI4Yy04LjggMC0xNi03LjItMTYtMTZ2LTMyYzAtOC44IDcuMi0xNiAxNi0xNmgyNTZjOC44IDAgMTYgNy4yIDE2IDE2djMyYzAgOC44LTcuMiAxNi0xNiAxNnptMCA2NEgxMjhjLTguOCAwLTE2LTcuMi0xNi0xNnYtMzJjMC04LjggNy4yLTE2IDE2LTE2aDI1NmM4LjggMCAxNiA3LjIgMTYgMTZ2MzJjMCA4LjgtNy4yIDE2LTE2IDE2em0wIDY0SDEyOGMtOC44IDAtMTYtNy4yLTE2LTE2di0zMmMwLTguOCA3LjItMTYgMTYtMTZoMjU2YzguOCAwIDE2IDcuMiAxNiAxNnYzMmMwIDguOC03LjIgMTYtMTYgMTZ6Ii8+PC9zdmc+';
+          thumb.src = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj48cGF0aCBmaWxsPSIjZTJlNWU3IiBkPSJNMTI4IDBjLTE3LjYgMC0zMiAxNC40LTMyIDMydjQ0OGMwIDE3LjYgMTQuNCAzMiAzMiAzMmgyNTZjMTcuNiAwIDMyLTE0LjQgMzItMzJWMTI4TDMwNCAwSDEyOHoiLz48cGF0aCBmaWxsPSIjYjVjM2QxIiBkPSJNMzg0IDEyOGgtODBjLTE3LjYgMC0zMi0xNC40LTMyLTMyVjBsODAgNzJoMzJ2NTZaIi8+PHBhdGggZmlsbD0iI2Y0NDMzNiIgZD0iTTM4NCAyNTZIMTI4Yy04LjggMC0xNi03LjItMTYtMTZ2LTMyYzAtOC44IDcuMi0xNiAxNi0xNmgyNTZjOC44IDAgMTYgNy4yIDE2IDE2djMyYzAgOC44LTcuMiAxNi0xNiAxNm0wIDY0SDEyOGMtOC44IDAtMTYtNy4yLTE2LTE2di0zMmMwLTguOCA3LjItMTYgMTYtMTZoMjU2YzguOCAwIDE2IDcuMiAxNiAxNnYzMmMwIDguOC03LjIgMTYtMTYgMTZ6Ii8+PC9zdmc+';
           // Generate object URL for PDF
           objectUrl = URL.createObjectURL(file);
         } else if (IMAGE_MIME_TYPES.includes(file.type)) {
@@ -1372,21 +1494,369 @@ Please see the attached documentation, including the signed rental contract and 
       }
       setTextFieldByLabel(TIPOLOGIA_LABEL, chosen[0]);
       
-      // Step 2: Generate cover page and open document selection modal
+      // Set the reply text immediately (this should work regardless of PDF generation)
+      setReplyText(DEFENDER_TEXT_HTML, true);
+      
+      // First make sure PDF-lib is available
       try {
-        // Use the standard Defender message in the Zendesk text field
-        setReplyText(DEFENDER_TEXT_HTML, true);
+        console.log("Checking PDF library availability...");
+        if (!isPDFLibAvailable()) {
+          await ensurePDFLibIsLoaded(); 
+        }
+        console.log("PDF library confirmed available");
         
-        // Create a defender cover page PDF
+        // Step 2: Generate cover page and open document selection modal
+        console.log("Generating cover page...");
         const coverPageBytes = await generateDefenderCoverPage(chosen);
+        console.log("Cover page generated successfully");
         
         // Open unified file selection modal with cover page already included
         createDefenderModal(refNum, coverPageBytes, chosen);
       } catch (err) {
-        console.error('Error creating defender PDF:', err);
-        alert('Error creating defender PDF: ' + err.message);
+        console.error('Error with PDF library or cover page generation:', err);
+        
+        // We'll show a simpler version that allows file attachment without PDF processing
+        alert(`PDF library issue: ${err.message}\nWe'll open a simple file upload dialog instead.`);
+        
+        // Create a simplified file upload dialog
+        createSimpleUploadModal(refNum, chosen);
       }
     });
+    
+    // Function to create a simplified upload modal without the cover page
+    function createSimpleUploadModal(refNum, selectedCauses) {
+      // Create a container for file uploads without PDF generation
+      const overlay = document.createElement('div');
+      overlay.style.position = 'fixed';
+      overlay.style.top = '0';
+      overlay.style.left = '0';
+      overlay.style.width = '100%';
+      overlay.style.height = '100%';
+      overlay.style.backgroundColor = 'rgba(0,0,0,0.5)';
+      overlay.style.backdropFilter = 'blur(3px)';
+      overlay.style.display = 'flex';
+      overlay.style.justifyContent = 'center';
+      overlay.style.alignItems = 'center';
+      overlay.style.zIndex = '9999';
+
+      // Create modal container
+      const modal = document.createElement('div');
+      modal.style.backgroundColor = '#fff';
+      modal.style.borderRadius = '10px';
+      modal.style.boxShadow = '0 4px 20px rgba(0,0,0,0.2)';
+      modal.style.width = '90%';
+      modal.style.maxWidth = '800px';
+      modal.style.maxHeight = '90%';
+      modal.style.display = 'flex';
+      modal.style.flexDirection = 'column';
+      modal.style.overflow = 'hidden';
+      modal.style.position = 'relative';
+
+      // Header
+      const header = document.createElement('div');
+      header.style.padding = '15px 20px';
+      header.style.borderBottom = '1px solid #eee';
+      header.style.display = 'flex';
+      header.style.justifyContent = 'space-between';
+      header.style.alignItems = 'center';
+      header.style.backgroundColor = '#f44336';
+      header.style.color = 'white';
+
+      const title = document.createElement('h2');
+      title.textContent = 'Defender Documents (Simple Mode)';
+      title.style.margin = '0';
+      title.style.fontSize = '18px';
+      title.style.fontWeight = 'bold';
+      title.style.color = 'white';
+
+      const closeBtn = document.createElement('button');
+      closeBtn.innerHTML = '&times;';
+      closeBtn.style.background = 'none';
+      closeBtn.style.border = 'none';
+      closeBtn.style.fontSize = '24px';
+      closeBtn.style.cursor = 'pointer';
+      closeBtn.style.color = 'white';
+      closeBtn.style.width = '30px';
+      closeBtn.style.height = '30px';
+      closeBtn.style.display = 'flex';
+      closeBtn.style.justifyContent = 'center';
+      closeBtn.style.alignItems = 'center';
+      closeBtn.style.borderRadius = '50%';
+      closeBtn.style.transition = 'background-color 0.2s';
+      closeBtn.style.marginLeft = 'auto';
+
+      header.appendChild(title);
+      header.appendChild(closeBtn);
+
+      // Content area
+      const content = document.createElement('div');
+      content.style.padding = '20px';
+      content.style.overflowY = 'auto';
+      content.style.flex = '1';
+      content.style.display = 'flex';
+      content.style.flexDirection = 'column';
+      content.style.gap = '20px';
+
+      // Warning about simple mode
+      const warningBox = document.createElement('div');
+      warningBox.style.backgroundColor = '#fff3cd';
+      warningBox.style.color = '#856404';
+      warningBox.style.padding = '15px';
+      warningBox.style.borderRadius = '6px';
+      warningBox.style.border = '1px solid #ffeeba';
+      warningBox.style.marginBottom = '15px';
+      warningBox.innerHTML = `
+        <div style="font-weight:bold;margin-bottom:8px;">⚠️ PDF Library Not Available</div>
+        <p style="margin:0;">Unable to generate the PDF cover page. You can still upload your documents individually.</p>
+      `;
+      content.appendChild(warningBox);
+
+      // Selected reasons display
+      const reasonsBox = document.createElement('div');
+      reasonsBox.style.backgroundColor = '#f8f9fa';
+      reasonsBox.style.padding = '15px';
+      reasonsBox.style.borderRadius = '6px';
+      reasonsBox.style.border = '1px solid #e9ecef';
+      reasonsBox.style.marginBottom = '15px';
+      
+      const reasonsTitle = document.createElement('div');
+      reasonsTitle.style.fontWeight = 'bold';
+      reasonsTitle.style.marginBottom = '8px';
+      reasonsTitle.textContent = 'Selected Reasons:';
+      
+      const reasonsList = document.createElement('ul');
+      reasonsList.style.margin = '0';
+      reasonsList.style.paddingLeft = '20px';
+      
+      for (const reason of selectedCauses) {
+        const item = document.createElement('li');
+        item.textContent = reason;
+        reasonsList.appendChild(item);
+      }
+      
+      reasonsBox.appendChild(reasonsTitle);
+      reasonsBox.appendChild(reasonsList);
+      content.appendChild(reasonsBox);
+
+      // File input area
+      const fileArea = document.createElement('div');
+      fileArea.style.border = '2px dashed #ddd';
+      fileArea.style.borderRadius = '6px';
+      fileArea.style.padding = '20px';
+      fileArea.style.textAlign = 'center';
+      fileArea.style.cursor = 'pointer';
+      fileArea.style.backgroundColor = '#f8f8f8';
+      fileArea.innerHTML = `
+        <svg fill="#999" width="48" height="48" viewBox="0 0 24 24">
+          <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/>
+        </svg>
+        <div style="margin-top:10px;font-weight:bold;">Click to select files or drag & drop</div>
+        <div style="font-size:12px;color:#666;margin-top:5px;">PDF, JPG, PNG files accepted</div>
+      `;
+      
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.multiple = true;
+      fileInput.accept = '.pdf,.jpg,.jpeg,.png';
+      fileInput.style.display = 'none';
+      
+      fileArea.appendChild(fileInput);
+      content.appendChild(fileArea);
+      
+      // File list container
+      const fileList = document.createElement('div');
+      fileList.style.marginTop = '15px';
+      content.appendChild(fileList);
+      
+      // Footer with buttons
+      const footer = document.createElement('div');
+      footer.style.padding = '15px 20px';
+      footer.style.borderTop = '1px solid #eee';
+      footer.style.display = 'flex';
+      footer.style.justifyContent = 'flex-end';
+      footer.style.backgroundColor = '#f9f9f9';
+      
+      const cancelBtn = document.createElement('button');
+      cancelBtn.textContent = 'Cancel';
+      cancelBtn.style.padding = '10px 16px';
+      cancelBtn.style.border = '1px solid #ddd';
+      cancelBtn.style.backgroundColor = '#f5f5f5';
+      cancelBtn.style.borderRadius = '4px';
+      cancelBtn.style.cursor = 'pointer';
+      cancelBtn.style.marginRight = '10px';
+      
+      const attachBtn = document.createElement('button');
+      attachBtn.textContent = 'Attach Files';
+      attachBtn.style.padding = '10px 20px';
+      attachBtn.style.border = 'none';
+      attachBtn.style.backgroundColor = '#f44336';
+      attachBtn.style.color = '#fff';
+      attachBtn.style.borderRadius = '4px';
+      attachBtn.style.cursor = 'pointer';
+      attachBtn.style.fontWeight = 'bold';
+      attachBtn.disabled = true;
+
+      footer.appendChild(cancelBtn);
+      footer.appendChild(attachBtn);
+      
+      modal.appendChild(header);
+      modal.appendChild(content);
+      modal.appendChild(footer);
+      overlay.appendChild(modal);
+      document.body.appendChild(overlay);
+      
+      // Selected files array
+      const selectedFiles = [];
+      
+      // File input handler
+      fileInput.addEventListener('change', () => {
+        handleFiles(fileInput.files);
+      });
+      
+      // Click to open file selector
+      fileArea.addEventListener('click', () => {
+        fileInput.click();
+      });
+      
+      // Drag and drop handling
+      fileArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        fileArea.style.backgroundColor = '#f0f0f0';
+        fileArea.style.borderColor = '#aaa';
+      });
+      
+      fileArea.addEventListener('dragleave', () => {
+        fileArea.style.backgroundColor = '#f8f8f8';
+        fileArea.style.borderColor = '#ddd';
+      });
+      
+      fileArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        fileArea.style.backgroundColor = '#f8f8f8';
+        fileArea.style.borderColor = '#ddd';
+        
+        if (e.dataTransfer.files.length) {
+          handleFiles(e.dataTransfer.files);
+        }
+      });
+      
+      // File handling function
+      function handleFiles(files) {
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          if (file.type === 'application/pdf' || file.type.startsWith('image/')) {
+            selectedFiles.push(file);
+            
+            // Create file entry in the list
+            const fileEntry = document.createElement('div');
+            fileEntry.style.display = 'flex';
+            fileEntry.style.alignItems = 'center';
+            fileEntry.style.padding = '10px';
+            fileEntry.style.marginBottom = '5px';
+            fileEntry.style.backgroundColor = '#f5f5f5';
+            fileEntry.style.borderRadius = '4px';
+            
+            // File icon
+            const fileIcon = document.createElement('div');
+            fileIcon.style.marginRight = '10px';
+            if (file.type === 'application/pdf') {
+              fileIcon.innerHTML = '<svg fill="#f44336" width="24" height="24" viewBox="0 0 24 24"><path d="M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8.5 7.5c0 .83-.67 1.5-1.5 1.5H9v1.25c0 .41-.34.75-.75.75s-.75-.34-.75-.75V8c0-.55.45-1 1-1H10c.83 0 1.5.67 1.5 1.5v1zm5 2c0 .83-.67 1.5-1.5 1.5h-2c-.28 0-.5-.22-.5-.5v-5c0-.28.22-.5.5-.5h2c.83 0 1.5.67 1.5 1.5v3zm4-3.75c0 .41-.34.75-.75.75H19v1h.75c.41 0 .75.34.75.75s-.34.75-.75.75H19v1.25c0 .41-.34.75-.75.75s-.75-.34-.75-.75V8c0-.55.45-1 1-1h1.25c.41 0 .75.34.75.75zM9 9.5h1v-1H9v1zM3 6c-.55 0-1 .45-1 1v13c0 1.1.9 2 2 2h13c.55 0 1-.45 1-1s-.45-1-1-1H5c-.55 0-1-.45-1-1V7c0-.55-.45-1-1-1zm11 5.5h1v-3h-1v3z"/></svg>';
+            } else {
+              fileIcon.innerHTML = '<svg fill="#4CAF50" width="24" height="24" viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>';
+            }
+            
+            // File name and size
+            const fileInfo = document.createElement('div');
+            fileInfo.style.flex = '1';
+            
+            const fileName = document.createElement('div');
+            fileName.textContent = file.name;
+            fileName.style.fontWeight = 'bold';
+            
+            const fileSize = document.createElement('div');
+            fileSize.textContent = formatFileSize(file.size);
+            fileSize.style.fontSize = '12px';
+            fileSize.style.color = '#666';
+            
+            fileInfo.appendChild(fileName);
+            fileInfo.appendChild(fileSize);
+            
+            // Remove button
+            const removeBtn = document.createElement('button');
+            removeBtn.innerHTML = '&times;';
+            removeBtn.style.background = 'none';
+            removeBtn.style.border = 'none';
+            removeBtn.style.color = '#f44336';
+            removeBtn.style.fontSize = '20px';
+            removeBtn.style.cursor = 'pointer';
+            removeBtn.title = 'Remove file';
+            
+            removeBtn.addEventListener('click', () => {
+              const index = selectedFiles.indexOf(file);
+              if (index !== -1) {
+                selectedFiles.splice(index, 1);
+                fileList.removeChild(fileEntry);
+                
+                // Update attachment button state
+                attachBtn.disabled = selectedFiles.length === 0;
+              }
+            });
+            
+            fileEntry.appendChild(fileIcon);
+            fileEntry.appendChild(fileInfo);
+            fileEntry.appendChild(removeBtn);
+            fileList.appendChild(fileEntry);
+          }
+        }
+        
+        // Update attachment button state
+        attachBtn.disabled = selectedFiles.length === 0;
+      }
+      
+      // Cancel button
+      cancelBtn.addEventListener('click', () => {
+        document.body.removeChild(overlay);
+      });
+      
+      // Close button
+      closeBtn.addEventListener('click', () => {
+        document.body.removeChild(overlay);
+      });
+      
+      // Attach button
+      attachBtn.addEventListener('click', async () => {
+        if (selectedFiles.length === 0) return;
+        
+        attachBtn.disabled = true;
+        attachBtn.textContent = 'Attaching...';
+        
+        try {
+          // Attach each file to the composer
+          for (const file of selectedFiles) {
+            try {
+              attachFileToComposer(file);
+              // Add a small delay between attachments
+              await new Promise(resolve => setTimeout(resolve, 300));
+            } catch (err) {
+              console.error(`Error attaching file ${file.name}:`, err);
+            }
+          }
+          
+          // Show success message
+          attachBtn.style.backgroundColor = '#4CAF50';
+          attachBtn.textContent = 'Files Attached!';
+          
+          // Close dialog after a delay
+          setTimeout(() => {
+            document.body.removeChild(overlay);
+          }, 1500);
+        } catch (err) {
+          console.error('Error attaching files:', err);
+          attachBtn.disabled = false;
+          attachBtn.textContent = 'Attach Files';
+        }
+      });
+    }
   }
 
   const interval = setInterval(() => {
@@ -1399,253 +1869,323 @@ Please see the attached documentation, including the signed rental contract and 
 
   // New function to generate a PDF cover page with defender reasons
   async function generateDefenderCoverPage(selectedCauses) {
-    await waitForPDFLib();
-    const { PDFDocument, rgb, StandardFonts } = window.PDFLib;
-    
-    // Create a new PDF document
-    const pdfDoc = await PDFDocument.create();
-    
-    // Add a blank page (A4 size)
-    const page = pdfDoc.addPage([595, 842]);
-    
-    // Get fonts
-    const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-    const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    
-    // OK Mobility colors
-    const okBlue = rgb(56/255, 85/255, 229/255); // #3855e5
-    
-    // Define margins
-    const margin = 50;
-    const width = page.getWidth() - 2 * margin;
-    
-    // Current y-position (start from top)
-    let y = page.getHeight() - margin;
-
-    // Add title
-    page.drawText("OK MOBILITY GROUP", {
-      x: margin,
-      y: y,
-      size: 24,
-      font: helveticaBold,
-      color: okBlue
-    });
-    
-    y -= 15;
-    
-    // Add horizontal line
-    page.drawLine({
-      start: { x: margin, y },
-      end: { x: page.getWidth() - margin, y },
-      thickness: 2,
-      color: okBlue
-    });
-    
-    y -= 40;
-    
-    // Add document title
-    page.drawText("CHARGEBACK DEFENSE DOCUMENTATION", {
-      x: margin,
-      y,
-      size: 18,
-      font: helveticaBold
-    });
-    
-    y -= 40;
-    
-    // Add current date
-    const today = new Date();
-    const dateStr = today.toLocaleDateString('en-GB', { 
-      day: '2-digit', 
-      month: '2-digit', 
-      year: 'numeric' 
-    });
-    
-    page.drawText(`Date: ${dateStr}`, {
-      x: margin,
-      y,
-      size: 12,
-      font: helvetica
-    });
-    
-    y -= 40;
-    
-    // Draw reasons section title
-    page.drawText("REASONS FOR REJECTING THE CHARGEBACK:", {
-      x: margin,
-      y,
-      size: 14,
-      font: helveticaBold,
-      color: okBlue
-    });
-    
-    y -= 30;
-    
-    // Add each selected cause
-    for (let cause of selectedCauses) {
-      // Calculate if text will fit on current page
-      if (y < margin + 100) {
-        // Add a new page if we're running out of space
-        page = pdfDoc.addPage([595, 842]);
-        y = page.getHeight() - margin;
+    // Make sure the library is available
+    try {
+      console.log("generateDefenderCoverPage: Ensuring PDFLib is loaded");
+      const { PDFDocument, rgb, StandardFonts } = await ensurePDFLibIsLoaded();
+      if (!PDFDocument || !rgb || !StandardFonts) {
+        throw new Error("PDFLib loaded but essential components are missing");
       }
       
-      // Draw bullet point
-      page.drawText("•", {
-        x: margin,
-        y,
-        size: 12,
-        font: helvetica
-      });
+      console.log("generateDefenderCoverPage: Creating document");
+      // Create a new PDF document
+      const pdfDoc = await PDFDocument.create();
       
-      // Draw cause text
-      page.drawText(cause, {
-        x: margin + 15,
-        y,
-        size: 12,
-        font: helveticaBold
-      });
+      // Add a blank page (A4 size)
+      console.log("generateDefenderCoverPage: Adding page");
+      const page = pdfDoc.addPage([595, 842]);
       
-      y -= 20;
+      // Get fonts
+      console.log("generateDefenderCoverPage: Embedding fonts");
+      let helveticaBold, helvetica;
+      try {
+        helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+        helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      } catch (fontErr) {
+        console.error("Error embedding fonts:", fontErr);
+        throw new Error("Failed to embed PDF fonts: " + fontErr.message);
+      }
       
-      // Add explanation text based on the cause (reuse snippets)
-      const snippet = DEFENDER_SNIPPETS[cause] || "";
-      // Extract first paragraph/sentence as summary
-      const summary = snippet.split('\n')[0]?.substring(0, 120) + "...";
+      // OK Mobility colors
+      const okBlue = rgb(56/255, 85/255, 229/255); // #3855e5
       
-      if (summary && summary.length > 3) {
-        // Word wrap the summary to fit the page width
-        const words = summary.split(' ');
-        let line = '';
+      // Define margins
+      const margin = 50;
+      const width = page.getWidth() - 2 * margin;
+      
+      // Current y-position (start from top)
+      let y = page.getHeight() - margin;
+
+      console.log("generateDefenderCoverPage: Drawing content");
+      try {
+        // Add title
+        page.drawText("OK MOBILITY GROUP", {
+          x: margin,
+          y: y,
+          size: 24,
+          font: helveticaBold,
+          color: okBlue
+        });
         
-        for (let word of words) {
-          const testLine = line + word + ' ';
-          const textWidth = helvetica.widthOfTextAtSize(testLine, 10);
-          
-          if (textWidth > width - 15) {
-            // Draw the current line
-            page.drawText(line, {
-              x: margin + 15,
-              y,
-              size: 10,
-              font: helvetica
-            });
-            y -= 15;
-            line = word + ' ';
-          } else {
-            line = testLine;
+        y -= 15;
+        
+        // Add horizontal line
+        page.drawLine({
+          start: { x: margin, y },
+          end: { x: page.getWidth() - margin, y },
+          thickness: 2,
+          color: okBlue
+        });
+        
+        y -= 40;
+        
+        // Add document title
+        page.drawText("CHARGEBACK DEFENSE DOCUMENTATION", {
+          x: margin,
+          y,
+          size: 18,
+          font: helveticaBold
+        });
+        
+        y -= 40;
+        
+        // Add current date
+        const today = new Date();
+        const dateStr = today.toLocaleDateString('en-GB', { 
+          day: '2-digit', 
+          month: '2-digit', 
+          year: 'numeric' 
+        });
+        
+        page.drawText(`Date: ${dateStr}`, {
+          x: margin,
+          y,
+          size: 12,
+          font: helvetica
+        });
+        
+        y -= 40;
+        
+        // Draw reasons section title
+        page.drawText("REASONS FOR REJECTING THE CHARGEBACK:", {
+          x: margin,
+          y,
+          size: 14,
+          font: helveticaBold,
+          color: okBlue
+        });
+        
+        y -= 30;
+        
+        // Add each selected cause
+        for (let cause of selectedCauses) {
+          // Calculate if text will fit on current page
+          if (y < margin + 100) {
+            // Add a new page if we're running out of space
+            page = pdfDoc.addPage([595, 842]);
+            y = page.getHeight() - margin;
           }
-        }
-        
-        // Draw the remaining text
-        if (line.trim()) {
-          page.drawText(line, {
-            x: margin + 15,
+          
+          // Draw bullet point
+          page.drawText("•", {
+            x: margin,
             y,
-            size: 10,
+            size: 12,
             font: helvetica
           });
+          
+          // Draw cause text
+          page.drawText(cause, {
+            x: margin + 15,
+            y,
+            size: 12,
+            font: helveticaBold
+          });
+          
           y -= 20;
+          
+          // Add explanation text based on the cause (reuse snippets)
+          const snippet = DEFENDER_SNIPPETS[cause] || "";
+          // Extract first paragraph/sentence as summary
+          const summary = snippet.split('\n')[0]?.substring(0, 120) + "...";
+          
+          if (summary && summary.length > 3) {
+            // Word wrap the summary to fit the page width
+            const words = summary.split(' ');
+            let line = '';
+            
+            for (let word of words) {
+              const testLine = line + word + ' ';
+              const textWidth = helvetica.widthOfTextAtSize(testLine, 10);
+              
+              if (textWidth > width - 15) {
+                // Draw the current line
+                page.drawText(line, {
+                  x: margin + 15,
+                  y,
+                  size: 10,
+                  font: helvetica
+                });
+                y -= 15;
+                line = word + ' ';
+              } else {
+                line = testLine;
+              }
+            }
+            
+            // Draw the remaining text
+            if (line.trim()) {
+              page.drawText(line, {
+                x: margin + 15,
+                y,
+                size: 10,
+                font: helvetica
+              });
+              y -= 20;
+            }
+          }
+          
+          // Add extra spacing between causes
+          y -= 10;
         }
+        
+        // Add footer
+        y = margin + 40;
+        
+        // Add horizontal line
+        page.drawLine({
+          start: { x: margin, y },
+          end: { x: page.getWidth() - margin, y },
+          thickness: 1,
+          color: okBlue
+        });
+        
+        y -= 25;
+        
+        // Add footer text
+        page.drawText("OK Mobility Group", {
+          x: margin,
+          y,
+          size: 10,
+          font: helveticaBold
+        });
+        
+        y -= 15;
+        
+        page.drawText("www.okmobility.com", {
+          x: margin,
+          y,
+          size: 10,
+          font: helvetica,
+          color: okBlue
+        });
+      } catch (drawErr) {
+        console.error("Error drawing PDF content:", drawErr);
+        throw new Error("Failed to draw PDF content: " + drawErr.message);
       }
       
-      // Add extra spacing between causes
-      y -= 10;
+      // Serialize the PDFDocument to bytes
+      console.log("generateDefenderCoverPage: Saving document");
+      try {
+        const pdfBytes = await pdfDoc.save();
+        console.log("generateDefenderCoverPage: Document saved successfully");
+        return pdfBytes;
+      } catch (saveErr) {
+        console.error("Error saving PDF:", saveErr);
+        throw new Error("Failed to save PDF: " + saveErr.message);
+      }
+    } catch (err) {
+      console.error("Error in generateDefenderCoverPage:", err);
+      throw err;
     }
-    
-    // Add footer
-    y = margin + 40;
-    
-    // Add horizontal line
-    page.drawLine({
-      start: { x: margin, y },
-      end: { x: page.getWidth() - margin, y },
-      thickness: 1,
-      color: okBlue
-    });
-    
-    y -= 25;
-    
-    // Add footer text
-    page.drawText("OK Mobility Group", {
-      x: margin,
-      y,
-      size: 10,
-      font: helveticaBold
-    });
-    
-    y -= 15;
-    
-    page.drawText("www.okmobility.com", {
-      x: margin,
-      y,
-      size: 10,
-      font: helvetica,
-      color: okBlue
-    });
-    
-    // Serialize the PDFDocument to bytes
-    const pdfBytes = await pdfDoc.save();
-    return pdfBytes;
   }
 
   // Function to merge defender cover page with other files
   async function mergeDefenderFiles(coverPageBytes, filesInfo) {
-    await waitForPDFLib();
-    const { PDFDocument } = window.PDFLib;
-    
-    // Create the main PDF document starting with the cover page
-    const mainPdf = await PDFDocument.load(coverPageBytes);
-    
-    // Add each file in the order they come in
-    for (let { file, arrayBuffer } of filesInfo) {
-      if (file.type === PDF_MIME) {
-        const pdfToMerge = await PDFDocument.load(arrayBuffer);
-        const copiedPages = await mainPdf.copyPages(pdfToMerge, pdfToMerge.getPageIndices());
-        copiedPages.forEach(page => mainPdf.addPage(page));
-      } else if (IMAGE_MIME_TYPES.includes(file.type)) {
-        // embed image in a new page (same as in mergeFilesIntoPDF)
-        let embeddedImage;
-        const imgExt = file.type.split('/')[1].toLowerCase();
-        if (imgExt === 'png') {
-          embeddedImage = await mainPdf.embedPng(arrayBuffer);
-        } else {
-          embeddedImage = await mainPdf.embedJpg(arrayBuffer);
-        }
-        
-        // Create page with image aspect ratio
-        const { width, height } = embeddedImage;
-        const isLandscape = width > height;
-        
-        const imgPage = isLandscape 
-          ? mainPdf.addPage([842, 595]) // A4 landscape
-          : mainPdf.addPage([595, 842]); // A4 portrait
-        
-        // Scale image to fit page
-        const pageWidth = imgPage.getWidth() - 40;
-        const pageHeight = imgPage.getHeight() - 40;
-        const scaleW = pageWidth / width;
-        const scaleH = pageHeight / height;
-        const scale = Math.min(scaleW, scaleH);
-        
-        const scaledWidth = width * scale;
-        const scaledHeight = height * scale;
-        
-        // Center the image on the page
-        const x = (imgPage.getWidth() - scaledWidth) / 2;
-        const y = (imgPage.getHeight() - scaledHeight) / 2;
-        
-        imgPage.drawImage(embeddedImage, {
-          x,
-          y,
-          width: scaledWidth,
-          height: scaledHeight
-        });
+    try {
+      console.log("mergeDefenderFiles: Ensuring PDFLib is loaded");
+      const { PDFDocument } = await ensurePDFLibIsLoaded();
+      
+      // Create the main PDF document starting with the cover page
+      console.log("mergeDefenderFiles: Loading cover page");
+      let mainPdf;
+      try {
+        mainPdf = await PDFDocument.load(coverPageBytes);
+      } catch (loadErr) {
+        console.error("Error loading cover page:", loadErr);
+        throw new Error("Failed to load cover page: " + loadErr.message);
       }
+      
+      // Add each file in the order they come in
+      console.log(`mergeDefenderFiles: Processing ${filesInfo.length} additional files`);
+      for (let i = 0; i < filesInfo.length; i++) {
+        const { file, arrayBuffer } = filesInfo[i];
+        console.log(`mergeDefenderFiles: Processing file ${i+1}/${filesInfo.length}:`, file.name);
+        
+        try {
+          if (file.type === PDF_MIME) {
+            console.log(`mergeDefenderFiles: Loading PDF file:`, file.name);
+            const pdfToMerge = await PDFDocument.load(arrayBuffer);
+            console.log(`mergeDefenderFiles: PDF loaded, copying pages from:`, file.name);
+            
+            const copiedPages = await mainPdf.copyPages(pdfToMerge, pdfToMerge.getPageIndices());
+            console.log(`mergeDefenderFiles: Adding ${copiedPages.length} pages to document`);
+            
+            copiedPages.forEach(page => mainPdf.addPage(page));
+          } else if (IMAGE_MIME_TYPES.includes(file.type)) {
+            console.log(`mergeDefenderFiles: Processing image:`, file.name);
+            // embed image in a new page (same as in mergeFilesIntoPDF)
+            let embeddedImage;
+            const imgExt = file.type.split('/')[1].toLowerCase();
+            if (imgExt === 'png') {
+              console.log(`mergeDefenderFiles: Embedding PNG`);
+              embeddedImage = await mainPdf.embedPng(arrayBuffer);
+            } else {
+              console.log(`mergeDefenderFiles: Embedding JPG`);
+              embeddedImage = await mainPdf.embedJpg(arrayBuffer);
+            }
+            
+            // Create page with image aspect ratio
+            const { width, height } = embeddedImage;
+            const isLandscape = width > height;
+            
+            console.log(`mergeDefenderFiles: Creating page for image`);
+            const imgPage = isLandscape 
+              ? mainPdf.addPage([842, 595]) // A4 landscape
+              : mainPdf.addPage([595, 842]); // A4 portrait
+            
+            // Scale image to fit page
+            const pageWidth = imgPage.getWidth() - 40;
+            const pageHeight = imgPage.getHeight() - 40;
+            const scaleW = pageWidth / width;
+            const scaleH = pageHeight / height;
+            const scale = Math.min(scaleW, scaleH);
+            
+            const scaledWidth = width * scale;
+            const scaledHeight = height * scale;
+            
+            // Center the image on the page
+            const x = (imgPage.getWidth() - scaledWidth) / 2;
+            const y = (imgPage.getHeight() - scaledHeight) / 2;
+            
+            console.log(`mergeDefenderFiles: Drawing image on page`);
+            imgPage.drawImage(embeddedImage, {
+              x,
+              y,
+              width: scaledWidth,
+              height: scaledHeight
+            });
+          }
+        } catch (fileErr) {
+          console.error(`Error processing file ${file.name}:`, fileErr);
+          // Continue with other files even if one fails
+          continue;
+        }
+      }
+      
+      console.log("mergeDefenderFiles: Saving final document");
+      try {
+        const pdfBytes = await mainPdf.save();
+        console.log("mergeDefenderFiles: Document saved successfully");
+        return pdfBytes;
+      } catch (saveErr) {
+        console.error("Error saving final PDF:", saveErr);
+        throw new Error("Failed to save final document: " + saveErr.message);
+      }
+    } catch (err) {
+      console.error("Error in mergeDefenderFiles:", err);
+      throw err;
     }
-    
-    const pdfBytes = await mainPdf.save();
-    return pdfBytes;
   }
 
   // Function to create the defender modal with cover page already included
