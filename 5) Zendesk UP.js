@@ -322,7 +322,7 @@
     <p style="font-size:15px;margin-bottom:15px;">Dear Partner,</p>
     <p style="margin:15px 0;">Thanks for your email.</p>
     <p style="font-weight:bold;color:#f44336;margin:20px 0;font-size:15px;">We do not accept the proposed chargeback.</p>
-    <p style="margin:15px 0;">Please find attached the documentation with our reasons for defending this case.</p>
+    <p style="margin:15px 0;">Please find below and attached the documentation with our reasons for defending this case.</p>
     <p style="margin-top:25px;font-size:15px;">Kind regards,</p>
   </div>
   `;
@@ -353,21 +353,53 @@
 
   // Create HTML templates for defender snippets
   function createHTMLSnippet(title, content) {
-    // Format the content: identify numbered points and create proper HTML structure
+    // Base template with OK Mobility branding
+    let htmlTemplate = `
+    <div style="max-width:800px;margin:0 auto;background-color:#ffffff;padding:30px;font-family:'Nunito',Verdana,sans-serif;font-size:15px;line-height:1.6;color:#333;">
+      <div style="text-align:left;margin-bottom:20px;">
+        <div style="display:inline-block;color:#3855e5;font-size:24px;font-weight:bold;">OK MOBILITY GROUP</div>
+      </div>
+      <hr style="border:none;height:2px;background-color:#3855e5;margin:15px 0 25px;">
+      
+      <div style="margin-bottom:30px;">
+        <h2 style="color:#333;font-size:18px;margin:0 0 5px;">CHARGEBACK DEFENSE DOCUMENTATION</h2>
+        <div style="color:#666;font-size:14px;">Date: ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}</div>
+      </div>
+      
+      <div style="background-color:#f8f9fa;border-left:4px solid #3855e5;padding:15px;margin-bottom:25px;">
+        <div style="font-weight:bold;margin-bottom:8px;color:#3855e5;font-size:16px;">REASON FOR REJECTING THE CHARGEBACK:</div>
+        <div style="font-weight:bold;font-size:16px;">${title}</div>
+      </div>
+      
+      <div class="content-area" style="margin-bottom:30px;">
+        ${processContent(content)}
+      </div>
+      
+      <hr style="margin:30px 0;border:none;border-top:1px solid #eee;">
+      <div style="font-weight:bold;color:#3855e5;">OK Mobility Group</div>
+      <div><a href="https://www.okmobility.com" style="color:#3855e5;text-decoration:none;">www.okmobility.com</a></div>
+    </div>
+    `;
+    
+    return htmlTemplate;
+  }
+  
+  // Helper function to process the content with better formatting
+  function processContent(content) {
     let formattedContent = content;
     
-    // Replace numbered points with bold headings
+    // Format numbered headers (1. Title)
     formattedContent = formattedContent.replace(/(\d+\.\s*)([^\n]+)/g, 
       '<h3 style="margin:25px 0 15px;color:#3855e5;font-size:16px;font-weight:bold;border-bottom:1px solid #eee;padding-bottom:8px;">$1$2</h3>');
     
-    // Replace arrow points with list items
-    formattedContent = formattedContent.replace(/(->\s+)([^\n]+)/g, 
-      '<li style="margin-bottom:8px;position:relative;">$2</li>');
+    // Format bullet points with arrows
+    formattedContent = formattedContent.replace(/->\s+([^\n]+)/g, 
+      '<li style="margin-bottom:12px;position:relative;list-style-type:none;padding-left:5px;">• $1</li>');
     
-    // Wrap lists in <ul> tags with better styling
+    // Wrap lists in styled <ul> tags
     if (formattedContent.includes('<li')) {
       formattedContent = formattedContent.replace(/(<li.*?<\/li>)/gs, 
-        '<ul style="margin:15px 0 20px 10px;padding-left:25px;list-style-type:circle;">$1</ul>');
+        '<ul style="margin:15px 0 20px 10px;padding-left:20px;background-color:#f9f9f9;padding:15px;border-radius:5px;">$1</ul>');
     }
     
     // Convert regular paragraphs with better spacing
@@ -381,7 +413,7 @@
     
     // Add extra spacing before the final clarification paragraph
     formattedContent = formattedContent.replace(/(evidence[\s\S]*?measures\.)<\/p>\s*<p>(We are available|We remain at your)/g, 
-      '$1</p>\n\n<p style="margin-top:25px;">$2');
+      '$1</p>\n\n<p style="margin-top:25px;padding-top:10px;border-top:1px dashed #eee;">$2');
     
     // Add extra space before any farewell/clarification paragraphs
     formattedContent = formattedContent.replace(/<p>(We (are available|remain|stand|trust|apologize|regret))/g, 
@@ -575,14 +607,45 @@ Please see the attached documentation, including the signed rental contract and 
       let htmlContent = `
       <div style="font-family:'Nunito',Verdana,sans-serif;font-size:14px;line-height:1.6;color:#333;max-width:800px;">
         <p style="font-size:15px;margin-bottom:20px;">Dear Partner,</p>
+        
+        <p style="margin:15px 0;">Thanks for your email.</p>
+        
+        <p style="font-weight:bold;color:#f44336;margin:20px 0;font-size:15px;">We do not accept the proposed chargeback.</p>
+        
+        <p style="margin:15px 0;">Please find below and attached the documentation with our reasons for defending this case.</p>
       `;
       
+      // Detailed reasons section
+      if (selectedCauses.length > 0) {
+        htmlContent += `
+        <div style="margin-top:25px;background-color:#f8f9fa;border:1px solid #e9ecef;border-left:4px solid #3855e5;padding:15px;margin-bottom:15px;border-radius:5px;">
+          <div style="font-weight:bold;color:#3855e5;margin-bottom:10px;">Defense reasons:</div>
+          <ul style="margin:10px 0;padding-left:20px;">
+        `;
+        
+        selectedCauses.forEach(cause => {
+          htmlContent += `<li style="margin-bottom:8px;font-weight:500;">${cause}</li>`;
+        });
+        
+        htmlContent += `
+          </ul>
+        </div>
+        `;
+      }
+      
+      // Include full defense text for each selected cause
       for (let i = 0; i < selectedCauses.length; i++) {
         const cause = selectedCauses[i];
         const snippet = DEFENDER_SNIPPETS_HTML[cause] || `<p>${cause} (no snippet found)</p>`;
         
-        // Don't add cause title even if there are multiple causes
-        // We only use cause internally for reference
+        // Add section header for each cause if there are multiple
+        if (selectedCauses.length > 1) {
+          htmlContent += `
+          <div style="margin-top:30px;margin-bottom:10px;background-color:#f8f9fa;padding:15px;border-left:4px solid #f44336;">
+            <div style="font-weight:bold;font-size:16px;">Defense Reason ${i+1}: ${cause}</div>
+          </div>
+          `;
+        }
         
         htmlContent += snippet;
         
@@ -749,6 +812,10 @@ Please see the attached documentation, including the signed rental contract and 
       await waitForPDFLib();
       console.log('PDFLib loaded successfully');
       
+      if (!window.PDFLib || !window.PDFLib.PDFDocument) {
+        throw new Error('PDFLib not properly loaded after multiple attempts');
+      }
+      
       const { PDFDocument } = window.PDFLib;
       console.log('Creating new PDF document');
       const mergedPdf = await PDFDocument.create();
@@ -773,7 +840,8 @@ Please see the attached documentation, including the signed rental contract and 
             console.log('Pages added successfully');
           } catch (pdfErr) {
             console.error('Error processing PDF:', pdfErr);
-            throw new Error(`Error processing PDF file ${file.name}: ${pdfErr.message}`);
+            // Continue with other files rather than failing completely
+            continue;
           }
         } else if (IMAGE_MIME_TYPES.includes(file.type)) {
           console.log('Processing image...');
@@ -791,17 +859,48 @@ Please see the attached documentation, including the signed rental contract and 
             }
             
             console.log('Image embedded, creating page...');
+            // Get natural image dimensions
             const { width, height } = embeddedImage.scale(1);
-            const page = mergedPdf.addPage([width, height]);
+            
+            // Create page that fits the image
+            const isLandscape = width > height;
+            const page = isLandscape 
+              ? mergedPdf.addPage([842, 595]) // A4 landscape
+              : mergedPdf.addPage([595, 842]); // A4 portrait
+            
+            // Scale image to fit page with margins
+            const pageWidth = page.getWidth() - 40;
+            const pageHeight = page.getHeight() - 40;
+            const scaleW = pageWidth / width;
+            const scaleH = pageHeight / height;
+            const scale = Math.min(scaleW, scaleH);
+            
+            const scaledWidth = width * scale;
+            const scaledHeight = height * scale;
+            
+            // Center the image on the page
+            const x = (page.getWidth() - scaledWidth) / 2;
+            const y = (page.getHeight() - scaledHeight) / 2;
             
             console.log('Drawing image on page...');
-            page.drawImage(embeddedImage, { x: 0, y: 0, width, height });
+            page.drawImage(embeddedImage, {
+              x,
+              y,
+              width: scaledWidth,
+              height: scaledHeight
+            });
+            
             console.log('Image added successfully');
           } catch (imgErr) {
             console.error('Error processing image:', imgErr);
-            throw new Error(`Error processing image file ${file.name}: ${imgErr.message}`);
+            // Continue with other files
+            continue;
           }
         }
+      }
+
+      if (mergedPdf.getPageCount() === 0) {
+        throw new Error('No pages were successfully added to the PDF');
       }
 
       console.log('All files processed, saving PDF...');
@@ -818,24 +917,37 @@ Please see the attached documentation, including the signed rental contract and 
     const composer = document.querySelector('.ck.ck-content[contenteditable="true"]');
     if (!composer) {
       console.warn("No CKEditor composer found to attach file.");
-      return;
+      return false;
     }
 
-    // Create a DataTransfer with the file
-    const dataTransfer = new DataTransfer();
-    dataTransfer.items.add(file);
+    try {
+      console.log("Preparing to attach file:", file.name);
+      
+      // Create a DataTransfer with the file
+      const dataTransfer = new DataTransfer();
+      dataTransfer.items.add(file);
 
-    // Construct a DragEvent with dataTransfer
-    const dropEvent = new DragEvent('drop', {
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-      dataTransfer
-    });
+      // Construct a DragEvent with dataTransfer
+      const dropEvent = new DragEvent('drop', {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        dataTransfer
+      });
 
-    // Dispatch it on the composer
-    console.log("Simulating drop event with file:", file.name);
-    composer.dispatchEvent(dropEvent);
+      // Dispatch it on the composer
+      console.log("Simulating drop event with file:", file.name);
+      composer.dispatchEvent(dropEvent);
+      
+      // Give focus to the editor to ensure Zendesk processes the attachment
+      composer.focus();
+      
+      console.log("File attachment attempted for:", file.name);
+      return true;
+    } catch (err) {
+      console.error("Error in attachFileToComposer:", err);
+      return false;
+    }
   }
 
   // The main modal for ARCHIVOS button
@@ -851,42 +963,80 @@ Please see the attached documentation, including the signed rental contract and 
         z-index: 999999;
       }
       #archivosModal {
-        background: #fff; padding: 20px; border-radius: 5px;
+        background: #fff; padding: 20px; border-radius: 10px;
         width: 800px; max-width: 90%; max-height: 90vh; 
-        box-shadow: 0 0 10px rgba(0,0,0,0.5);
+        box-shadow: 0 0 20px rgba(0,0,0,0.2);
         position: relative; overflow-y: auto;
+        display: flex; flex-direction: column;
+      }
+      #archivosHeader {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 15px;
+      }
+      #archivosTitle {
+        font-size: 20px; font-weight: bold; color: #3855e5;
+        margin: 0;
       }
       #archivosDragArea {
         border: 2px dashed #ccc; padding: 20px; text-align: center;
-        margin-bottom: 15px;
+        margin-bottom: 15px; background-color: #f9f9f9;
+        border-radius: 5px; transition: all 0.2s;
+      }
+      #archivosDragArea:hover {
+        border-color: #3855e5; background-color: #f5f7ff;
       }
       #archivosFiles {
         display: block; margin-top: 10px;
       }
       #archivosClose {
-        position: absolute; top: 5px; right: 8px; border: none;
-        background: transparent; font-size: 16px; cursor: pointer;
+        background: none; border: none; font-size: 22px; 
+        cursor: pointer; color: #666; width: 30px; height: 30px;
+        display: flex; justify-content: center; align-items: center;
+        border-radius: 50%; transition: background 0.2s;
+      }
+      #archivosClose:hover {
+        background-color: #f0f0f0;
+      }
+      #archivosActions {
+        display: flex; justify-content: flex-end; margin-top: 20px;
+        border-top: 1px solid #eee; padding-top: 15px;
       }
       #archivosSubmit {
-        background: #008CBA; color: #fff; padding: 8px 15px;
-        border: none; cursor: pointer; margin-right: 10px;
+        background: #3855e5; color: #fff; padding: 10px 20px;
+        border: none; cursor: pointer; border-radius: 5px;
+        font-weight: bold; display: flex; align-items: center;
+        transition: background-color 0.2s;
+      }
+      #archivosSubmit:hover {
+        background-color: #2b44c9;
+      }
+      #archivosSubmit svg {
+        margin-right: 8px;
+      }
+      #archivosInfo {
+        background-color: #f8f9fa; border-left: 4px solid #3855e5;
+        padding: 15px; margin-bottom: 20px; font-size: 14px;
+        border-radius: 3px;
       }
       #archivosPreviewContainer {
         margin: 15px 0; max-height: 400px; overflow-y: auto;
-        display: grid; grid-gap: 10px;
+        display: grid; grid-gap: 10px; flex: 1;
       }
       .archivos-preview-item {
-        display: flex; align-items: center; padding: 10px;
+        display: flex; align-items: center; padding: 12px;
         border: 1px solid #ddd; border-radius: 5px; position: relative;
-        background: #f9f9f9; cursor: move;
+        background: #f9f9f9; cursor: move; transition: all 0.2s;
+      }
+      .archivos-preview-item:hover {
+        background: #f5f5f5; border-color: #ccc;
       }
       .archivos-preview-item.dragging {
-        opacity: 0.5;
+        opacity: 0.5; box-shadow: 0 0 10px rgba(0,0,0,0.1);
       }
       .archivos-preview-thumbnail {
         width: 80px; height: 80px; margin-right: 15px;
         object-fit: contain; background: #fff;
-        border: 1px solid #eee;
+        border: 1px solid #eee; border-radius: 5px;
         cursor: pointer;
       }
       .archivos-preview-details {
@@ -905,23 +1055,38 @@ Please see the attached documentation, including the signed rental contract and 
         margin: 0 3px; cursor: pointer; font-size: 18px;
         width: 30px; height: 30px; display: flex;
         align-items: center; justify-content: center;
+        transition: background 0.2s;
+      }
+      .archivos-move-btn:hover {
+        background: #ddd;
+      }
+      .archivos-move-btn:disabled {
+        opacity: 0.5; cursor: not-allowed;
       }
       .archivos-remove-btn {
         background: #f44336; color: white;
-        border: none; border-radius: 50%; width: 22px; height: 22px;
-        position: absolute; top: 5px; right: 5px;
+        border: none; border-radius: 50%; width: 26px; height: 26px;
+        position: absolute; top: 8px; right: 8px;
         display: flex; align-items: center; justify-content: center;
-        cursor: pointer; font-size: 14px;
+        cursor: pointer; font-size: 14px; transition: background 0.2s;
+        opacity: 0.8;
+      }
+      .archivos-remove-btn:hover {
+        background: #d32f2f; opacity: 1;
       }
       .archivos-empty {
-        text-align: center; padding: 20px; color: #666;
-        font-style: italic;
+        text-align: center; padding: 30px; color: #666;
+        font-style: italic; background: #f9f9f9; border-radius: 5px;
       }
       .archivos-preview-btn {
         background: #3855e5; color: white;
         border: none; border-radius: 3px; 
-        padding: 3px 8px; margin-top: 5px;
+        padding: 5px 10px; margin-top: 5px;
         cursor: pointer; font-size: 12px;
+        transition: background 0.2s;
+      }
+      .archivos-preview-btn:hover {
+        background: #2b44c9;
       }
       #largePdfPreview {
         position: fixed; top: 0; left: 0; width: 100%; height: 100%;
@@ -938,10 +1103,25 @@ Please see the attached documentation, including the signed rental contract and 
         background: rgba(255,255,255,0.2); color: white;
         border: none; border-radius: 50%; width: 36px; height: 36px;
         display: flex; align-items: center; justify-content: center;
-        cursor: pointer; font-size: 24px;
+        cursor: pointer; font-size: 24px; transition: background 0.2s;
+      }
+      #largePdfPreviewClose:hover {
+        background: rgba(255,255,255,0.3);
       }
       #largePdfPreviewName {
         color: white; margin-bottom: 15px; font-size: 16px;
+      }
+      @keyframes archivos-spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      .archivos-spinner {
+        width: 16px; height: 16px; 
+        border: 2px solid #fff; 
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: archivos-spin 0.8s linear infinite;
+        margin-right: 8px;
       }
     `;
     document.head.appendChild(style);
@@ -951,14 +1131,45 @@ Please see the attached documentation, including the signed rental contract and 
 
     const modal = document.createElement('div');
     modal.id = 'archivosModal';
-
+    
+    // Header with title and close button
+    const header = document.createElement('div');
+    header.id = 'archivosHeader';
+    
+    const title = document.createElement('h2');
+    title.id = 'archivosTitle';
+    title.textContent = 'Merge & Attach Documents';
+    
     const closeBtn = document.createElement('button');
     closeBtn.id = 'archivosClose';
     closeBtn.textContent = '✕';
+    
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+    
+    // Info section
+    const infoSection = document.createElement('div');
+    infoSection.id = 'archivosInfo';
+    infoSection.innerHTML = `
+      <p style="margin:0 0 10px 0;"><strong>Instructions:</strong></p>
+      <ol style="margin:0;padding-left:20px;">
+        <li>Add PDF and image files using drag & drop or the file selector</li>
+        <li>Arrange them in the desired order using the up/down buttons</li>
+        <li>Click "Merge & Attach PDF" to create a single PDF and attach it to your response</li>
+      </ol>
+    `;
 
     const dragArea = document.createElement('div');
     dragArea.id = 'archivosDragArea';
-    dragArea.textContent = 'Drag & drop files here or click below to select';
+    dragArea.innerHTML = `
+      <div style="margin-bottom:10px;font-size:16px;">
+        <svg fill="#3855e5" width="24" height="24" viewBox="0 0 24 24" style="vertical-align:middle;margin-right:8px;">
+          <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/>
+        </svg>
+        Drag & drop files here
+      </div>
+      <div style="font-size:14px;color:#666;">or click below to select</div>
+    `;
 
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
@@ -975,15 +1186,26 @@ Please see the attached documentation, including the signed rental contract and 
     emptyMsg.textContent = 'No files added yet. Add files to see preview.';
     previewContainer.appendChild(emptyMsg);
 
+    // Footer with action buttons
+    const actions = document.createElement('div');
+    actions.id = 'archivosActions';
+    
     const submitBtn = document.createElement('button');
     submitBtn.id = 'archivosSubmit';
-    submitBtn.textContent = 'Merge & Download PDF';
+    submitBtn.innerHTML = `
+      <svg fill="#fff" width="16" height="16" viewBox="0 0 24 24">
+        <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+      </svg>
+      Merge & Attach PDF
+    `;
 
-    modal.appendChild(closeBtn);
+    modal.appendChild(header);
+    modal.appendChild(infoSection);
     modal.appendChild(dragArea);
     modal.appendChild(fileInput);
     modal.appendChild(previewContainer);
-    modal.appendChild(submitBtn);
+    modal.appendChild(actions);
+    actions.appendChild(submitBtn);
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
@@ -1188,10 +1410,12 @@ Please see the attached documentation, including the signed rental contract and 
         item.addEventListener('dragenter', (e) => {
           e.preventDefault();
           item.style.borderColor = '#3855e5';
+          item.style.backgroundColor = '#f5f7ff';
         });
         
         item.addEventListener('dragleave', () => {
           item.style.borderColor = '#ddd';
+          item.style.backgroundColor = '#f9f9f9';
         });
         
         item.addEventListener('drop', (e) => {
@@ -1214,6 +1438,7 @@ Please see the attached documentation, including the signed rental contract and 
           }
           
           item.style.borderColor = '#ddd';
+          item.style.backgroundColor = '#f9f9f9';
         });
         
         item.addEventListener('dragend', () => {
@@ -1283,7 +1508,8 @@ Please see the attached documentation, including the signed rental contract and 
       dragArea.addEventListener(evtName, (e) => {
         e.preventDefault();
         e.stopPropagation();
-        dragArea.style.borderColor = '#008CBA';
+        dragArea.style.borderColor = '#3855e5';
+        dragArea.style.backgroundColor = '#f5f7ff';
       }, false);
     });
     ['dragleave', 'drop'].forEach(evtName => {
@@ -1291,6 +1517,7 @@ Please see the attached documentation, including the signed rental contract and 
         e.preventDefault();
         e.stopPropagation();
         dragArea.style.borderColor = '#ccc';
+        dragArea.style.backgroundColor = '#f9f9f9';
       }, false);
     });
     dragArea.addEventListener('drop', (e) => {
@@ -1299,6 +1526,11 @@ Please see the attached documentation, including the signed rental contract and 
         // Scroll to show previews
         previewContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
+    });
+    
+    // Make drag area clickable to open file selector
+    dragArea.addEventListener('click', () => {
+      fileInput.click();
     });
 
     // FILE input
@@ -1323,7 +1555,10 @@ Please see the attached documentation, including the signed rental contract and 
       }
       
       submitBtn.disabled = true;
-      submitBtn.textContent = 'Processing...';
+      submitBtn.innerHTML = `
+        <div class="archivos-spinner"></div>
+        Processing...
+      `;
       
       try {
         console.log('Starting PDF merge process for', selectedFiles.length, 'files');
@@ -1360,22 +1595,42 @@ Please see the attached documentation, including the signed rental contract and 
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        URL.revokeObjectURL(url);
         console.log('PDF download initiated');
 
         // 3) Also attach it to composer
         // We create a new File from the blob, with the same name
         const pdfFile = new File([blob], finalPdfName, { type: PDF_MIME });
-        attachFileToComposer(pdfFile);
-        console.log('Attached PDF to composer');
+        
+        console.log("Attaching PDF to Zendesk composer:", finalPdfName);
+        const attached = attachFileToComposer(pdfFile);
+        if (!attached) {
+          throw new Error('Failed to attach PDF to composer. Please attach it manually.');
+        }
 
-        // 4) Close modal
-        document.body.removeChild(overlay);
+        // 4) Show success
+        submitBtn.style.backgroundColor = '#4CAF50';
+        submitBtn.innerHTML = `
+          <svg fill="#fff" width="16" height="16" viewBox="0 0 24 24">
+            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
+          </svg>
+          PDF Attached!
+        `;
+        
+        // 5) Close modal after a short delay
+        setTimeout(() => {
+          document.body.removeChild(overlay);
+        }, 1500);
+        
       } catch (err) {
         console.error('Error merging files:', err);
         alert('Error merging files: ' + err.message);
         submitBtn.disabled = false;
-        submitBtn.textContent = 'Merge & Download PDF';
+        submitBtn.innerHTML = `
+          <svg fill="#fff" width="16" height="16" viewBox="0 0 24 24">
+            <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+          </svg>
+          Merge & Attach PDF
+        `;
       }
     });
   }
@@ -1762,7 +2017,7 @@ Please see the attached documentation, including the signed rental contract and 
             if (file.type === 'application/pdf') {
               fileIcon.innerHTML = '<svg fill="#f44336" width="24" height="24" viewBox="0 0 24 24"><path d="M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8.5 7.5c0 .83-.67 1.5-1.5 1.5H9v1.25c0 .41-.34.75-.75.75s-.75-.34-.75-.75V8c0-.55.45-1 1-1H10c.83 0 1.5.67 1.5 1.5v1zm5 2c0 .83-.67 1.5-1.5 1.5h-2c-.28 0-.5-.22-.5-.5v-5c0-.28.22-.5.5-.5h2c.83 0 1.5.67 1.5 1.5v3zm4-3.75c0 .41-.34.75-.75.75H19v1h.75c.41 0 .75.34.75.75s-.34.75-.75.75H19v1.25c0 .41-.34.75-.75.75s-.75-.34-.75-.75V8c0-.55.45-1 1-1h1.25c.41 0 .75.34.75.75zM9 9.5h1v-1H9v1zM3 6c-.55 0-1 .45-1 1v13c0 1.1.9 2 2 2h13c.55 0 1-.45 1-1s-.45-1-1-1H5c-.55 0-1-.45-1-1V7c0-.55-.45-1-1-1zm11 5.5h1v-3h-1v3z"/></svg>';
             } else {
-              fileIcon.innerHTML = '<svg fill="#4CAF50" width="24" height="24" viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>';
+              fileIcon.innerHTML = '<svg fill="#4CAF50" width="24" height="24" viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7c0-1.1-.9-2-2-2zm-4.86 8.86l-3 3.87L9 13.14 6 17h12l-3.86-5.14z"/></svg>';
             }
             
             // File name and size
@@ -2096,6 +2351,10 @@ Please see the attached documentation, including the signed rental contract and 
       console.log("mergeDefenderFiles: Ensuring PDFLib is loaded");
       const { PDFDocument } = await ensurePDFLibIsLoaded();
       
+      if (!PDFDocument) {
+        throw new Error("PDFDocument is not available");
+      }
+      
       // Create the main PDF document starting with the cover page
       console.log("mergeDefenderFiles: Loading cover page");
       let mainPdf;
@@ -2105,6 +2364,9 @@ Please see the attached documentation, including the signed rental contract and 
         console.error("Error loading cover page:", loadErr);
         throw new Error("Failed to load cover page: " + loadErr.message);
       }
+      
+      // Track if we successfully added any files
+      let addedFiles = 0;
       
       // Add each file in the order they come in
       console.log(`mergeDefenderFiles: Processing ${filesInfo.length} additional files`);
@@ -2122,6 +2384,7 @@ Please see the attached documentation, including the signed rental contract and 
             console.log(`mergeDefenderFiles: Adding ${copiedPages.length} pages to document`);
             
             copiedPages.forEach(page => mainPdf.addPage(page));
+            addedFiles++;
           } else if (IMAGE_MIME_TYPES.includes(file.type)) {
             console.log(`mergeDefenderFiles: Processing image:`, file.name);
             // embed image in a new page (same as in mergeFilesIntoPDF)
