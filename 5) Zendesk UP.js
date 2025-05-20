@@ -2093,7 +2093,7 @@ Please see the attached documentation, including the signed rental contract and 
       console.log("generateDefenderCoverPage: Adding page");
       const pageWidth = 595;
       const pageHeight = 842;
-      const page = pdfDoc.addPage([pageWidth, pageHeight]);
+      let page = pdfDoc.addPage([pageWidth, pageHeight]);
       
       // Get fonts
       console.log("generateDefenderCoverPage: Embedding fonts");
