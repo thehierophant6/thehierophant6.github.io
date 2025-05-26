@@ -2055,11 +2055,12 @@ Please see the attached documentation, including the signed rental contract and 
       const subj = getTicketSubject();
       const refNum = extractRefNumber(subj);
       if (!refNum) {
-        // Keep only critical alert for missing reference
-        alert('No valid reference found in subject!');
-        return;
+        // Warn about missing reference but continue with the process
+        console.warn('No valid reference found in subject - continuing without reference number');
+      } else {
+        // Only set the reference field if we found a valid reference
+        setTextFieldByLabel(REFERENCIA_LABEL, refNum);
       }
-      setTextFieldByLabel(REFERENCIA_LABEL, refNum);
 
       // Skip reason selection for ACEPTAR - it's always the same
       setReplyText(ACEPTAR_TEXT_HTML, true);
@@ -2071,11 +2072,12 @@ Please see the attached documentation, including the signed rental contract and 
       const subj = getTicketSubject();
       const refNum = extractRefNumber(subj);
       if (!refNum) {
-        // Keep only critical alert for missing reference
-        alert('No valid reference found in subject!');
-        return;
+        // Warn about missing reference but continue with the process
+        console.warn('No valid reference found in subject - continuing without reference number');
+      } else {
+        // Only set the reference field if we found a valid reference
+        setTextFieldByLabel(REFERENCIA_LABEL, refNum);
       }
-      setTextFieldByLabel(REFERENCIA_LABEL, refNum);
 
       // Step 1: Select reasons
       const chosen = await showDefenderPopup();
