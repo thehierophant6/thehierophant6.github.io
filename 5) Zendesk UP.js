@@ -463,18 +463,31 @@ We have attached the rental documentation and any evidence (e.g., photographs or
 We are available for any further clarifications.
 `.trim(),
 
-    "Cargo – Cancelación NR": `Referring to the disputed charge and the customer's request to refund a non-refundable booking, we would like to clarify:
+    "Cargo – Cancelación NR": `We would like to inform you that the charge in question corresponds to a booking made by our mutual customer through our website. In this case, the customer selected the LITE rate, which is clearly identified as a non-refundable rate that does not allow changes or cancellations, except in duly accredited cases of force majeure.
+
 1. Choice of Non-Refundable Rate
-In our General Conditions (point 8.1.4 and reinforced by our Cancellation Policy in point 22), the Lite Rate (or any other non-refundable rate the customer selected) does not admit any reimbursement once the booking is confirmed, unless a strictly documented force majeure situation applies.
+In our General Conditions (point 8.1.4 and reinforced by our Cancellation Policy in point 22), the Lite Rate (or any other non-refundable rate the customer selected) does not admit any reimbursement once the booking is confirmed, unless a strictly documented force majeure situation applies. This condition is explicitly indicated during the reservation process, and is also reflected in point 22 of our General Terms and Conditions, which were accepted by the customer upon confirming the booking:
+
+"For Non-Refundable Rates, no refund will be issued except in the cases of force majeure mentioned above."
+
 2. Customer's Explicit Consent
 By choosing the non-refundable rate, the customer agreed to its conditions:
 -> No right to cancellation and no refund.
 -> This policy is clearly displayed during the booking process and reiterated in the Rental Agreement.
-3. Cancellation/Refund Limitations
+-> The booking conditions were accepted by the customer at the time of reservation.
+
+3. Legal Framework and Regulatory Support
+Furthermore, we would like to point out that this policy is legally supported by both national and European regulations:
+-> Article 103.l of the Spanish General Law for the Defence of Consumers and Users (as amended by Law 3/2014 of 27 March) states that the right of withdrawal does not apply to vehicle rental contracts with a specific date or period of execution.
+-> This same exception is also provided for in Article 16.l of Directive 2011/83/EU of the European Parliament and of the Council, which excludes from the right of withdrawal those services related to vehicle rentals contracted for specific dates.
+
+4. Cancellation/Refund Limitations
 In line with point 22 of our General Conditions, all cancellations must be requested in writing, and non-refundable bookings are not subject to reimbursement. Any exception (e.g., force majeure) must be documented and evaluated according to the policy terms.
-4. Attached Documentation
-We have attached the customer's signed booking confirmation, which states the rate type and the corresponding non-refundable clause. The booking conditions were accepted by the customer at the time of reservation.
-Given these points, we regret to inform you that no refund can be issued for this booking. We remain at your disposal for any questions.
+
+5. Attached Documentation
+For your reference, we have attached a screenshot from our website, as well as a copy of the Terms and Conditions accepted by the customer before completing the booking. We have also attached the customer's signed booking confirmation, which states the rate type and the corresponding non-refundable clause.
+
+As the customer has not provided any justification based on force majeure, we are unable to process a refund for the charge, as it was correctly applied, the customer was informed during the reservation process of our General Terms and Conditions, and it fully complies with the applicable legal and contractual framework. Given these points, we regret to inform you that no refund can be issued for this booking. We remain at your disposal for any questions.
 `.trim(),
 
     "Cargo – Limpieza": `Referring to the disputed cleaning fee charge, please note the following:
@@ -2696,12 +2709,97 @@ Please see the attached documentation, including the signed rental contract and 
             }
           });
           
-          // Add extra spacing between causes
-          y -= 10;
+                  // Add extra spacing between causes
+        y -= 10;
+      }
+      
+      // Check if "Cargo – Cancelación NR" is selected and add the image
+      if (selectedCauses.includes("Cargo – Cancelación NR")) {
+        console.log("generateDefenderCoverPage: Adding Cancelación NR image");
+        try {
+          // Add a new page for the image
+          page = pdfDoc.addPage([pageWidth, pageHeight]);
+          y = pageHeight - margin;
+          
+          // Add title for the image page
+          page.drawText("SUPPORTING DOCUMENTATION - NON-REFUNDABLE BOOKING", {
+            x: margin,
+            y,
+            size: 14,
+            font: Nunito,
+            color: okBlue
+          });
+          
+          y -= 40;
+          
+          // Fetch the image from the URL
+          const imageUrl = 'https://i.ibb.co/DfgVgPyT/Captura-Cancelacion-NR.png';
+          console.log("Fetching image from:", imageUrl);
+          
+          const imageResponse = await fetch(imageUrl);
+          if (!imageResponse.ok) {
+            throw new Error(`Failed to fetch image: ${imageResponse.status}`);
+          }
+          
+          const imageBytes = await imageResponse.arrayBuffer();
+          console.log("Image fetched successfully, size:", imageBytes.byteLength);
+          
+          // Embed the image (assuming it's PNG based on the URL)
+          const embeddedImage = await pdfDoc.embedPng(imageBytes);
+          console.log("Image embedded successfully");
+          
+          // Get image dimensions and calculate scaling
+          const { width: imgWidth, height: imgHeight } = embeddedImage.scale(1);
+          const maxImageWidth = pageWidth - 20; // Leave some margin
+          const maxImageHeight = y - margin - 60; // Leave space for footer
+          
+          // Calculate scale to fit the image on the page
+          const scaleW = maxImageWidth / imgWidth;
+          const scaleH = maxImageHeight / imgHeight;
+          const scale = Math.min(scaleW, scaleH, 1); // Don't scale up
+          
+          const scaledWidth = imgWidth * scale;
+          const scaledHeight = imgHeight * scale;
+          
+          // Center the image horizontally
+          const imageX = margin + (maxImageWidth - scaledWidth) / 2;
+          const imageY = y - scaledHeight;
+          
+          // Draw the image
+          page.drawImage(embeddedImage, {
+            x: imageX,
+            y: imageY,
+            width: scaledWidth,
+            height: scaledHeight
+          });
+          
+          console.log("Image drawn successfully on PDF");
+          
+          // Add caption below the image
+          const captionY = imageY - 20;
+          page.drawText("Screenshot: Non-Refundable Rate Selection Process", {
+            x: margin,
+            y: captionY,
+            size: 10,
+            font: Nunito,
+            color: rgb(0.5, 0.5, 0.5) // Gray color
+          });
+          
+        } catch (imageErr) {
+          console.error("Error adding Cancelación NR image:", imageErr);
+          // Continue without the image if there's an error
+          page.drawText("Note: Supporting screenshot could not be loaded", {
+            x: margin,
+            y: y - 20,
+            size: 10,
+            font: Nunito,
+            color: rgb(0.8, 0.2, 0.2) // Red color for error
+          });
         }
-        
-        // Add footer
-        y = margin + 40;
+      }
+      
+      // Add footer
+      y = margin + 40;
         
         // Add horizontal line
         page.drawLine({
