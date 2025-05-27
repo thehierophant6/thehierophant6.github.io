@@ -2733,7 +2733,7 @@ Please see the attached documentation, including the signed rental contract and 
           y -= 40;
           
           // Fetch the image from the URL
-          const imageUrl = 'https://i.ibb.co/DfgVgPyT/Captura-Cancelacion-NR.png';
+          const imageUrl = 'https://i.ibb.co/7tNYNx5L/Captura-Cancelacion-NR.png';
           console.log("Fetching image from:", imageUrl);
           
           const imageResponse = await fetch(imageUrl);
