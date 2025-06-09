@@ -1133,8 +1133,66 @@ Please see the attached documentation, including the signed rental contract and 
         const currentCause = editor.dataset.currentCause;
         editableSnippets[currentCause] = editor.value;
         
-        // Generate custom HTML for email
-        const customHtml = buildDefenderMessage(selectedCauses, true);
+        // Generate custom HTML for email using edited snippets
+        const customSnippets = {...DEFENDER_SNIPPETS};
+        for (const cause in editableSnippets) {
+          customSnippets[cause] = editableSnippets[cause];
+        }
+        
+        const customBuildDefenderMessage = (causes) => {
+          const header = `
+          <div style="font-family:'Nunito',Verdana,sans-serif;max-width:850px;margin:0 auto">
+            <header style="background:#3855e5;background:linear-gradient(90deg,#3855e5 0%,#4f6bff 100%);
+                           color:#fff;padding:24px 32px;border-radius:12px 12px 0 0">
+              <h1 style="margin:0;font-size:28px;letter-spacing:.5px">OK Mobility</h1>
+              <p style="margin:6px 0 0;font-size:15px;opacity:.9">Chargeback defence documentation</p>
+              <p style="margin:2px 0 0;font-size:13px;opacity:.8">${new Date()
+                .toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}</p>
+            </header>
+            <main style="background:#fff;border:1px solid #e2e8ff;border-top:0;padding:32px;border-radius:0 0 12px 12px">
+              <p style="font-size:16px">Dear Partner,</p>
+              <p style="margin:12px 0 24px 0">Thanks for your e-mail.</p>
+              <p style="font-size:17px;font-weight:700;color:#e02b2b;margin:0 0 24px">
+                We do not accept the proposed chargeback.
+              </p>
+              <p style="margin:0 0 32px">Please find below and attached the documentation with our reasons for defending this case.</p>`;
+
+          const footer = `
+              <p style="margin:40px 0 0 0">Kind regards,</p>
+            </main>
+          </div>`;
+
+          let body = '';
+          causes.forEach((cause, idx) => {
+            // Generate HTML snippet with custom content
+            const customContent = processContent(customSnippets[cause]);
+            const translatedTitle = CAUSE_TRANSLATIONS[cause] || cause;
+            
+            const snippetHtml = `
+            <div style="max-width:800px;margin:0 auto;background-color:#ffffff;font-family:'Nunito',Verdana,sans-serif;font-size:15px;line-height:1.6;color:#333;">
+              <div style="margin-bottom:30px;">
+                ${causes.length > 1 ? `
+                <div style="background-color:#f8f9fa;border-left:4px solid #3855e5;padding:15px;margin-bottom:15px;">
+                  <div style="font-weight:bold;font-size:16px;">Reason ${idx + 1}: ${translatedTitle}</div>
+                </div>` : ''}
+                <div class="content-area">
+                  ${customContent}
+                </div>
+              </div>
+            </div>`;
+            
+            const panel = `
+              <section style="margin-bottom:40px">
+                ${snippetHtml}
+              </section>`;
+            body += panel;
+          });
+
+          return header + body + footer;
+        };
+        
+        // Generate the custom HTML with edited snippets
+        const customHtml = customBuildDefenderMessage(selectedCauses);
         
         document.body.removeChild(overlay);
         resolve({
@@ -2481,7 +2539,7 @@ Please see the attached documentation, including the signed rental contract and 
   }, 1500);
 
   // New function to generate a PDF cover page with defender reasons
-  async function generateDefenderCoverPage(selectedCauses) {
+  async function generateDefenderCoverPage(selectedCauses, customSnippets = null) {
     // Make sure the library is available
     try {
       console.log("generateDefenderCoverPage: Ensuring PDFLib is loaded");
@@ -2622,7 +2680,14 @@ Please see the attached documentation, including the signed rental contract and 
           y -= 20;
           
           // Draw full text of each snippet instead of just summary
-          const snippetLines = SNIPPET_LINES[cause] || [];
+          // Use custom snippets if provided, otherwise fall back to default
+          let snippetText;
+          if (customSnippets && customSnippets[cause]) {
+            snippetText = customSnippets[cause];
+          } else {
+            snippetText = DEFENDER_SNIPPETS[cause] || '';
+          }
+          const snippetLines = snippetText.split(/\r?\n/);
           const lineHeight = 14; // Increased line height for better readability
           const paragraphSpacing = 10; // More space between paragraphs
           const maxWidth = pageWidth - margin * 2;
