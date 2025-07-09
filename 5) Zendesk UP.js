@@ -3145,7 +3145,7 @@
       /******************************************************************
        * 1.  Arrays y helpers
        ******************************************************************/
-      const SOLICITUD_PREFIX   = 'solicituddocumentacionadicional';   // en minúsculas para comparar
+      const SOLICITUD_PREFIX   = 'solicituddocumentacion';   // en minúsculas para comparar (detecta tanto "solicituddocumentacion" como "solicituddocumentacionadicional")
 
       /* --- helper: garantiza que el PDF de "solicitud…" quede SIEMPRE
              en position 0 y la coverPageFile en position 1 ------------- */
