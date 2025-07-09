@@ -3568,8 +3568,17 @@
           actionsDiv.style.display = 'flex';
           actionsDiv.style.gap = '5px';
           
-          // Up button
+          // Create all buttons first
           const upBtn = document.createElement('button');
+          const downBtn = document.createElement('button');
+          const removeBtn = document.createElement('button');
+          
+          // Set disabled states
+          upBtn.disabled = locked || i === 1; // Can't move up if it's right after cover page
+          downBtn.disabled = locked || i === selectedFiles.length - 1;
+          removeBtn.disabled = locked;
+          
+          // Up button
           upBtn.innerHTML = '↑';
           upBtn.style.border = 'none';
           upBtn.style.backgroundColor = '#f0f0f0';
@@ -3578,7 +3587,6 @@
           upBtn.style.borderRadius = '4px';
           upBtn.style.cursor = 'pointer';
           upBtn.title = 'Move up';
-          upBtn.disabled = locked || i === 1; // Can't move up if it's right after cover page
           
           if (upBtn.disabled) {
             upBtn.style.opacity = locked ? '.35' : '0.5';
@@ -3592,7 +3600,6 @@
           });
           
           // Down button
-          const downBtn = document.createElement('button');
           downBtn.innerHTML = '↓';
           downBtn.style.border = 'none';
           downBtn.style.backgroundColor = '#f0f0f0';
@@ -3601,7 +3608,6 @@
           downBtn.style.borderRadius = '4px';
           downBtn.style.cursor = 'pointer';
           downBtn.title = 'Move down';
-          downBtn.disabled = locked || i === selectedFiles.length - 1;
           
           if (downBtn.disabled) {
             downBtn.style.opacity = locked ? '.35' : '0.5';
@@ -3615,7 +3621,6 @@
           });
           
           // Remove button
-          const removeBtn = document.createElement('button');
           removeBtn.innerHTML = '×';
           removeBtn.style.border = 'none';
           removeBtn.style.backgroundColor = '#ffebee';
@@ -3627,7 +3632,6 @@
           removeBtn.style.fontSize = '20px';
           removeBtn.style.lineHeight = '0';
           removeBtn.title = 'Remove';
-          removeBtn.disabled = locked;
           
           if (removeBtn.disabled) {
             removeBtn.style.opacity = locked ? '.35' : '1';
