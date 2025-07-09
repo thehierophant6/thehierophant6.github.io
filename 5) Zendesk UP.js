@@ -3135,19 +3135,19 @@
   
     // Function to create the defender modal with cover page already included
     function createDefenderModal(refNum, coverPageBytes, selectedCauses) {
-      // Create a File object for the cover page
-      const coverPageFile = new File(
-        [coverPageBytes], 
-        'cover_page.pdf', 
-        { type: PDF_MIME }
-      );
-      
       /******************************************************************
        * 1.  Arrays y helpers
        ******************************************************************/
       const PDF_MIME           = 'application/pdf';
       const IMAGE_MIME_TYPES   = ['image/jpeg','image/png','image/gif','image/webp','image/heic','image/heif'];
       const SOLICITUD_PREFIX   = 'solicituddocumentacion';   // en minúsculas para comparar (detecta tanto "solicituddocumentacion" como "solicituddocumentacionadicional")
+      
+      // Create a File object for the cover page
+      const coverPageFile = new File(
+        [coverPageBytes], 
+        'cover_page.pdf', 
+        { type: PDF_MIME }
+      );
 
       /* helper sencillo para quitar tildes y pasar a minúsculas */
       function slug(str){
