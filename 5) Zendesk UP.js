@@ -3499,6 +3499,7 @@
         // Add each file preview
         for (let i = 0; i < selectedFiles.length; i++) {
           const file = selectedFiles[i];
+          const locked = (i < 2);             // 0=solicitud, 1=cover
           
           const previewDiv = document.createElement('div');
           previewDiv.className = 'file-preview';
@@ -3541,7 +3542,6 @@
           infoDiv.style.minWidth = '0';
           
           const nameDiv = document.createElement('div');
-          const locked = (i < 2);             // 0=solicitud, 1=cover
           if (locked) {
             // icono candado + texto fijo
             nameDiv.textContent = (i===0)
@@ -3568,8 +3568,17 @@
           actionsDiv.style.display = 'flex';
           actionsDiv.style.gap = '5px';
           
-          // Up button
+          // Create all buttons first
           const upBtn = document.createElement('button');
+          const downBtn = document.createElement('button');
+          const removeBtn = document.createElement('button');
+          
+          // Set disabled states
+          upBtn.disabled = locked || i === 1; // Can't move up if it's right after cover page
+          downBtn.disabled = locked || i === selectedFiles.length - 1;
+          removeBtn.disabled = locked;
+          
+          // Up button
           upBtn.innerHTML = '↑';
           upBtn.style.border = 'none';
           upBtn.style.backgroundColor = '#f0f0f0';
@@ -3578,10 +3587,6 @@
           upBtn.style.borderRadius = '4px';
           upBtn.style.cursor = 'pointer';
           upBtn.title = 'Move up';
-          // desactivar botones mover/eliminar en locked
-          upBtn.disabled = locked || i === 1; // Can't move up if it's right after cover page
-          downBtn.disabled = locked || i === selectedFiles.length - 1;
-          removeBtn.disabled = locked;
           
           if (upBtn.disabled) {
             upBtn.style.opacity = locked ? '.35' : '0.5';
@@ -3595,7 +3600,6 @@
           });
           
           // Down button
-          const downBtn = document.createElement('button');
           downBtn.innerHTML = '↓';
           downBtn.style.border = 'none';
           downBtn.style.backgroundColor = '#f0f0f0';
@@ -3617,7 +3621,6 @@
           });
           
           // Remove button
-          const removeBtn = document.createElement('button');
           removeBtn.innerHTML = '×';
           removeBtn.style.border = 'none';
           removeBtn.style.backgroundColor = '#ffebee';
