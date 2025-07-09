@@ -3145,23 +3145,33 @@
       /******************************************************************
        * 1.  Arrays y helpers
        ******************************************************************/
+      const PDF_MIME           = 'application/pdf';
+      const IMAGE_MIME_TYPES   = ['image/jpeg','image/png','image/gif','image/webp','image/heic','image/heif'];
       const SOLICITUD_PREFIX   = 'solicituddocumentacion';   // en minúsculas para comparar (detecta tanto "solicituddocumentacion" como "solicituddocumentacionadicional")
+
+      /* helper sencillo para quitar tildes y pasar a minúsculas */
+      function slug(str){
+        return str.normalize('NFD')
+                  .replace(/[\u0300-\u036f]/g,'')   // tildes fuera
+                  .toLowerCase();
+      }
 
       /* --- helper: garantiza que el PDF de "solicitud…" quede SIEMPRE
              en position 0 y la coverPageFile en position 1 ------------- */
       function placeLockedPages(selectedFiles, coverPageFile){
-        // quita duplicados anteriores
-        const existsIdx = selectedFiles.findIndex(f =>
-            f.name.toLowerCase().startsWith(SOLICITUD_PREFIX));
-        if (existsIdx > -1) selectedFiles.splice(existsIdx,1);
+        // Verificar si ya hay un PDF real
+        const hasReal = selectedFiles.some(f =>
+            slug(f.name).startsWith(SOLICITUD_PREFIX) && f.size);
+
+        if (!hasReal) {
+          // Solo crear placeholder si no hay PDF real
+          const dummySolic = new File([''], '⚠️ Añadir solicitudDocumentacionAdicional.pdf', {type:PDF_MIME});
+          selectedFiles.unshift(dummySolic);                     // position 0
+        }
 
         // mueve la cover a idx 1 (si estuviese en otra parte)
         const coverIdx = selectedFiles.indexOf(coverPageFile);
         if (coverIdx > -1) selectedFiles.splice(coverIdx,1);
-
-        // inserta "solicitud…" (placeholder si todavía no existe)
-        const dummySolic = new File([''], '⚠️ Añadir solicitudDocumentacionAdicional.pdf', {type:PDF_MIME});
-        selectedFiles.unshift(dummySolic);                     // position 0
         selectedFiles.splice(1,0,coverPageFile);               // position 1
       }
       
@@ -3544,9 +3554,14 @@
           const nameDiv = document.createElement('div');
           if (locked) {
             // icono candado + texto fijo
-            nameDiv.textContent = (i===0)
-               ? 'SolicitudDocumentacionAdicional (1ª página bloqueada)'
-               : 'Cover page con motivos (2ª página bloqueada)';
+            if (i === 0) {
+              // Si es placeholder, mostrar mensaje. Si es PDF real, mostrar nombre real
+              nameDiv.textContent = file.size === 0 
+                ? 'SolicitudDocumentacionAdicional (1ª página bloqueada)'
+                : `${file.name} (1ª página bloqueada)`;
+            } else {
+              nameDiv.textContent = 'Cover page con motivos (2ª página bloqueada)';
+            }
           } else {
             nameDiv.textContent = file.name;
           }
@@ -3746,24 +3761,30 @@
        -----------------------------------------------------------------*/
       function handleNewFiles(fileList){
         let added = 0;
-        for (let file of fileList){
-          const isSolicitud = file.name.toLowerCase()
-                             .startsWith(SOLICITUD_PREFIX);
-          const isOKtype    = (file.type === PDF_MIME
-                            || IMAGE_MIME_TYPES.includes(file.type));
-          if (!isOKtype) continue;
+        for (const file of fileList){
+          if (!(file.type === PDF_MIME || IMAGE_MIME_TYPES.includes(file.type))) continue;
+
+          const isSolicitud = slug(file.name).startsWith(SOLICITUD_PREFIX);
 
           if (isSolicitud){
-            // reemplaza placeholder o versión anterior
+            /* --- sustituye placeholder o versión anterior --- */
             const idx = selectedFiles.findIndex(f =>
-                f.name.toLowerCase().startsWith(SOLICITUD_PREFIX));
-            if (idx > -1) selectedFiles[idx] = file;
-            else          selectedFiles.splice(0,0,file);
-            // asegura orden (cover en idx 1)
-            placeLockedPages(selectedFiles, coverPageFile);
-          } else {
-            selectedFiles.push(file);          // a partir de idx 2
+                slug(f.name).startsWith(SOLICITUD_PREFIX));
+            if (idx > -1)  selectedFiles.splice(idx,1);  // borra dummy / viejo
+
+            selectedFiles.splice(0,0,file);              // ⬅️ 1ª posición
+
+            /* coverPageFile siempre en posición 1 */
+            const coverIdx = selectedFiles.indexOf(coverPageFile);
+            if (coverIdx !== 1){
+                if (coverIdx > -1) selectedFiles.splice(coverIdx,1);
+                selectedFiles.splice(1,0,coverPageFile);
+            }
+
+            added++;
+            continue;
           }
+          selectedFiles.push(file);              // resto al final
           added++;
         }
         if (added) updatePreview();
@@ -3858,7 +3879,7 @@
         /******************************************************************
          * 4.  Validación antes de "Create & Attach"
          ******************************************************************/
-        if (!selectedFiles[0].name.toLowerCase().startsWith(SOLICITUD_PREFIX)){
+        if (!slug(selectedFiles[0].name).startsWith(SOLICITUD_PREFIX)){
            return alert('❗ Falta la primera hoja: sube el PDF '+
                         '"solicitudDocumentacionAdicional…".');
         }
