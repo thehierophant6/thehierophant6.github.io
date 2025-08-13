@@ -2793,83 +2793,6 @@ We therefore request that this chargeback be dismissed in favour of our company.
             page = pdfDoc.addPage([pageWidth, pageHeight]);
             y = pageHeight - margin;
             
-            // Add title for the image page
-            page.drawText("SUPPORTING DOCUMENTATION - NON-REFUNDABLE BOOKING", {
-              x: margin,
-              y,
-              size: 14,
-              font: Nunito,
-              color: okBlue
-            });
-            
-            y -= 40;
-            
-            // Fetch the image from the URL
-            const imageUrl = 'https://i.ibb.co/7tNYNx5L/Captura-Cancelacion-NR.png';
-            console.log("Fetching image from:", imageUrl);
-            
-            const imageResponse = await fetch(imageUrl);
-            if (!imageResponse.ok) {
-              throw new Error(`Failed to fetch image: ${imageResponse.status}`);
-            }
-            
-            const imageBytes = await imageResponse.arrayBuffer();
-            console.log("Image fetched successfully, size:", imageBytes.byteLength);
-            
-            // Embed the image (assuming it's PNG based on the URL)
-            const embeddedImage = await pdfDoc.embedPng(imageBytes);
-            console.log("Image embedded successfully");
-            
-            // Get image dimensions and calculate scaling
-            const { width: imgWidth, height: imgHeight } = embeddedImage.scale(1);
-            const maxImageWidth = pageWidth - 20; // Leave some margin
-            const maxImageHeight = y - margin - 60; // Leave space for footer
-            
-            // Calculate scale to fit the image on the page
-            const scaleW = maxImageWidth / imgWidth;
-            const scaleH = maxImageHeight / imgHeight;
-            const scale = Math.min(scaleW, scaleH, 1); // Don't scale up
-            
-            const scaledWidth = imgWidth * scale;
-            const scaledHeight = imgHeight * scale;
-            
-            // Center the image horizontally
-            const imageX = margin + (maxImageWidth - scaledWidth) / 2;
-            const imageY = y - scaledHeight;
-            
-            // Draw the image
-            page.drawImage(embeddedImage, {
-              x: imageX,
-              y: imageY,
-              width: scaledWidth,
-              height: scaledHeight
-            });
-            
-            console.log("Image drawn successfully on PDF");
-            
-            // Add caption below the image
-            const captionY = imageY - 20;
-            page.drawText("Screenshot: Non-Refundable Rate Selection Process", {
-              x: margin,
-              y: captionY,
-              size: 10,
-              font: Nunito,
-              color: rgb(0.5, 0.5, 0.5) // Gray color
-            });
-            
-          } catch (imageErr) {
-            console.error("Error adding Cancelación NR image:", imageErr);
-            // Continue without the image if there's an error
-            page.drawText("Note: Supporting screenshot could not be loaded", {
-              x: margin,
-              y: y - 20,
-              size: 10,
-              font: Nunito,
-              color: rgb(0.8, 0.2, 0.2) // Red color for error
-            });
-          }
-        }
-        
         // Add footer
         y = margin + 40;
           
@@ -3976,5 +3899,6 @@ We therefore request that this chargeback be dismissed in favour of our company.
   
 
   })();
+
 
 
