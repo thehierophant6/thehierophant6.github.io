@@ -463,31 +463,36 @@
   We are available for any further clarifications.
   `.trim(),
   
-      "Cargo – Cancelación NR": `We would like to inform you that the charge in question corresponds to a booking made by our mutual customer through our website. In this case, the customer selected the LITE rate, which is clearly identified as a non-refundable rate that does not allow changes or cancellations, except in duly accredited cases of force majeure.
+      "Cargo – Cancelación NR": `We would like to inform you that the charge in question corresponds to a booking made by our mutual customer through our website. In this case, the customer selected a rate clearly identified in our General Terms and Conditions as non-cancellable and/or non-refundable, which does not allow changes or cancellations, except in duly accredited cases of force majeure.
   
   1. Choice of Non-Refundable Rate
-  In our General Conditions (point 8.1.4 and reinforced by our Cancellation Policy in point 22), the Lite Rate (or any other non-refundable rate the customer selected) does not admit any reimbursement once the booking is confirmed, unless a strictly documented force majeure situation applies. This condition is explicitly indicated during the reservation process, and is also reflected in point 22 of our General Terms and Conditions, which were accepted by the customer upon confirming the booking:
-  
-  "For Non-Refundable Rates, no refund will be issued except in the cases of force majeure mentioned above."
-  
-  2. Customer's Explicit Consent
-  By choosing the non-refundable rate, the customer agreed to its conditions:
-  -> No right to cancellation and no refund.
-  -> This policy is clearly displayed during the booking process and reiterated in the Rental Agreement.
-  -> The booking conditions were accepted by the customer at the time of reservation.
-  
-  3. Legal Framework and Regulatory Support
-  Furthermore, we would like to point out that this policy is legally supported by both national and European regulations:
-  -> Article 103.l of the Spanish General Law for the Defence of Consumers and Users (as amended by Law 3/2014 of 27 March) states that the right of withdrawal does not apply to vehicle rental contracts with a specific date or period of execution.
-  -> This same exception is also provided for in Article 16.l of Directive 2011/83/EU of the European Parliament and of the Council, which excludes from the right of withdrawal those services related to vehicle rentals contracted for specific dates.
-  
-  4. Cancellation/Refund Limitations
-  In line with point 22 of our General Conditions, all cancellations must be requested in writing, and non-refundable bookings are not subject to reimbursement. Any exception (e.g., force majeure) must be documented and evaluated according to the policy terms.
-  
-  5. Attached Documentation
-  For your reference, we have attached a screenshot from our website, as well as a copy of the Terms and Conditions accepted by the customer before completing the booking. We have also attached the customer's signed booking confirmation, which states the rate type and the corresponding non-refundable clause.
-  
-  As the customer has not provided any justification based on force majeure, we are unable to process a refund for the charge, as it was correctly applied, the customer was informed during the reservation process of our General Terms and Conditions, and it fully complies with the applicable legal and contractual framework. Given these points, we regret to inform you that no refund can be issued for this booking. We remain at your disposal for any questions.
+
+According to our General Terms and Conditions, publicly available on our website (https://okmobility.com/en/), any non-refundable rate does not allow reimbursement once the booking is confirmed, unless a strictly documented force majeure situation applies. This condition is explicitly displayed during the booking process and reiterated in the cancellation policy section.
+ 
+2. Customer's Explicit Consent
+
+By choosing the non-refundable rate, the customer explicitly agreed to its conditions:
+No right to cancellation and no refund.
+This policy is clearly displayed during the booking process and reiterated in the Rental Agreement.
+The booking conditions were accepted by the customer before proceeding with the payment.
+3. Legal Framework and Regulatory Support
+
+This policy is fully supported by both national and European regulations:
+Article 103.l of the Spanish General Law for the Defence of Consumers and Users (as amended by Law 3/2014 of 27 March) establishes that the right of withdrawal does not apply to vehicle rental contracts with a specific date or period of execution.
+Article 16.l of Directive 2011/83/EU of the European Parliament and of the Council contains the same exception for vehicle rentals contracted for specific dates.
+4. Cancellation/Refund Limitations
+
+As stated in our General Terms and Conditions, all cancellations must be requested prior to the start date of the rental through the official channels provided. Non-refundable bookings are not subject to reimbursement. Any exception (e.g., force majeure) must be duly documented and evaluated according to the policy terms.
+ 
+5. Attached Documentation
+
+For your reference, we have attached:
+A copy of the General Terms and Conditions accepted by the customer before completing the booking.
+Screenshots showing the full booking process as seen by the customer, highlighting where the non-refundable conditions are displayed and accepted.
+The customer’s signed booking confirmation, indicating the selected rate type and the corresponding non-refundable clause.
+As the customer has not provided any evidence of a force majeure circumstance, we confirm that the charge was correctly applied, the conditions were clearly communicated and accepted during the booking process, and the policy is in full compliance with the applicable legal and contractual framework.
+ 
+We therefore request that this chargeback be dismissed in favour of our company. We remain at your disposal for any further clarification.
   `.trim(),
   
       "Cargo – Limpieza": `Referring to the disputed cleaning fee charge, please note the following:
@@ -3967,4 +3972,5 @@
       });
     }
   
+
   })();
