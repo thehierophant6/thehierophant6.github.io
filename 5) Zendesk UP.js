@@ -472,14 +472,16 @@ According to our General Terms and Conditions, publicly available on our website
 2. Customer's Explicit Consent
 
 By choosing the non-refundable rate, the customer explicitly agreed to its conditions:
-No right to cancellation and no refund.
-This policy is clearly displayed during the booking process and reiterated in the Rental Agreement.
-The booking conditions were accepted by the customer before proceeding with the payment.
+-> No right to cancellation and no refund.
+-> This policy is clearly displayed during the booking process and reiterated in the Rental Agreement.
+-> The booking conditions were accepted by the customer before proceeding with the payment.
+
 3. Legal Framework and Regulatory Support
 
 This policy is fully supported by both national and European regulations:
 Article 103.l of the Spanish General Law for the Defence of Consumers and Users (as amended by Law 3/2014 of 27 March) establishes that the right of withdrawal does not apply to vehicle rental contracts with a specific date or period of execution.
 Article 16.l of Directive 2011/83/EU of the European Parliament and of the Council contains the same exception for vehicle rentals contracted for specific dates.
+
 4. Cancellation/Refund Limitations
 
 As stated in our General Terms and Conditions, all cancellations must be requested prior to the start date of the rental through the official channels provided. Non-refundable bookings are not subject to reimbursement. Any exception (e.g., force majeure) must be duly documented and evaluated according to the policy terms.
@@ -487,9 +489,9 @@ As stated in our General Terms and Conditions, all cancellations must be request
 5. Attached Documentation
 
 For your reference, we have attached:
-A copy of the General Terms and Conditions accepted by the customer before completing the booking.
-Screenshots showing the full booking process as seen by the customer, highlighting where the non-refundable conditions are displayed and accepted.
-The customer’s signed booking confirmation, indicating the selected rate type and the corresponding non-refundable clause.
+-> A copy of the General Terms and Conditions accepted by the customer before completing the booking.
+-> Screenshots showing the full booking process as seen by the customer in our website (https://okmobility.com/es/rent/), highlighting where the non-refundable conditions are displayed and accepted.
+-> The customer’s signed booking confirmation, indicating the selected rate type and the corresponding non-refundable clause.
 As the customer has not provided any evidence of a force majeure circumstance, we confirm that the charge was correctly applied, the conditions were clearly communicated and accepted during the booking process, and the policy is in full compliance with the applicable legal and contractual framework.
  
 We therefore request that this chargeback be dismissed in favour of our company. We remain at your disposal for any further clarification.
@@ -3974,4 +3976,5 @@ We therefore request that this chargeback be dismissed in favour of our company.
   
 
   })();
+
 
