@@ -463,11 +463,11 @@
   We are available for any further clarifications.
   `.trim(),
   
-      "Cargo – Cancelación NR": `We would like to inform you that the charge in question corresponds to a booking made by our mutual customer through our website. In this case, the customer selected a rate clearly identified in our General Terms and Conditions as non-cancellable and/or non-refundable, which does not allow changes or cancellations, except in duly accredited cases of force majeure.
+      "Cargo – Cancelación NR": `We would like to inform you that the charge in question corresponds to a booking made by our mutual customer through our website (https://okmobility.com/es/rent/). In this case, the customer selected a rate clearly identified in our General Terms and Conditions as non-cancellable and/or non-refundable, which does not allow changes or cancellations, except in duly accredited cases of force majeure.
   
   1. Choice of Non-Refundable Rate
 
-According to our General Terms and Conditions, publicly available on our website (https://okmobility.com/en/), any non-refundable rate does not allow reimbursement once the booking is confirmed, unless a strictly documented force majeure situation applies. This condition is explicitly displayed during the booking process and reiterated in the cancellation policy section.
+According to our General Terms and Conditions, publicly available on our website, any non-refundable rate does not allow reimbursement once the booking is confirmed, unless a strictly documented force majeure situation applies. This condition is explicitly displayed during the booking process and reiterated in the cancellation policy section.
  
 2. Customer's Explicit Consent
 
@@ -3974,3 +3974,4 @@ We therefore request that this chargeback be dismissed in favour of our company.
   
 
   })();
+
