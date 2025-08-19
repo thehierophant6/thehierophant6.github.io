@@ -3183,6 +3183,25 @@ We kindly request that the chargeback be reversed in favor of our company.
       }
     }
   
+    // Function to fetch PDF from GitHub repository
+    async function fetchGitHubPDF(repoUrl, fileName) {
+      try {
+        console.log(`Fetching ${fileName} from GitHub...`);
+        const response = await fetch(repoUrl);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch ${fileName}: ${response.status}`);
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
+        const file = new File([blob], fileName, { type: 'application/pdf' });
+        console.log(`Successfully fetched ${fileName} from GitHub`);
+        return file;
+      } catch (error) {
+        console.error(`Error fetching ${fileName} from GitHub:`, error);
+        throw error;
+      }
+    }
+
     // Function to create the defender modal with cover page already included
     function createDefenderModal(refNum, coverPageBytes, selectedCauses) {
       /******************************************************************
@@ -3191,6 +3210,9 @@ We kindly request that the chargeback be reversed in favor of our company.
       const PDF_MIME           = 'application/pdf';
       const IMAGE_MIME_TYPES   = ['image/jpeg','image/png','image/gif','image/webp','image/heic','image/heif'];
       const SOLICITUD_PREFIX   = 'solicituddocumentacion';   // en minúsculas para comparar (detecta tanto "solicituddocumentacion" como "solicituddocumentacionadicional")
+      
+      // GitHub repository URL for automatic file fetching
+      const GITHUB_BASE_URL = 'https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/'; // Replace with your actual GitHub repo URL
       
       // Create a File object for the cover page
       const coverPageFile = new File(
@@ -3228,6 +3250,107 @@ We kindly request that the chargeback be reversed in favor of our company.
       // Selected files array (starting with cover page)
       const selectedFiles = [];
       placeLockedPages(selectedFiles, coverPageFile);
+      
+      // Auto-fetch files based on selected causes
+      const autoFetchFiles = async () => {
+        // Check if "NO SHOW - Reembolsable" is selected
+        if (selectedCauses.includes("NO SHOW - Reembolsable")) {
+          try {
+            console.log("NO SHOW - Reembolsable detected, auto-fetching Tarifas reembolsables PDF...");
+            const tarifasUrl = GITHUB_BASE_URL + 'Tarifas%20reembolsables%201.pdf'; // URL encode the filename
+            const tarifasFile = await fetchGitHubPDF(tarifasUrl, 'Tarifas reembolsables 1.pdf');
+            
+            // Add the file to selectedFiles (it will be placed after the locked pages)
+            selectedFiles.push(tarifasFile);
+            
+            // Update the preview to show the new file
+            updatePreview();
+            
+            // Show a notification that the file was auto-added
+            showAutoAddNotification('Tarifas reembolsables 1.pdf');
+            
+          } catch (error) {
+            console.error('Failed to auto-fetch Tarifas reembolsables PDF:', error);
+            // Show a warning but don't block the workflow
+            showAutoAddError('Tarifas reembolsables 1.pdf', error.message);
+          }
+        }
+      };
+      
+      // Function to show auto-add notification
+      const showAutoAddNotification = (fileName) => {
+        const notification = document.createElement('div');
+        notification.style.position = 'fixed';
+        notification.style.top = '20px';
+        notification.style.right = '20px';
+        notification.style.backgroundColor = '#4CAF50';
+        notification.style.color = 'white';
+        notification.style.padding = '15px 20px';
+        notification.style.borderRadius = '6px';
+        notification.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
+        notification.style.zIndex = '10001';
+        notification.style.fontSize = '14px';
+        notification.style.fontWeight = 'bold';
+        notification.style.maxWidth = '300px';
+        notification.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <svg fill="white" width="20" height="20" viewBox="0 0 24 24">
+              <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
+            </svg>
+            <div>
+              <div>Auto-added:</div>
+              <div style="font-weight: normal; opacity: 0.9;">${fileName}</div>
+            </div>
+          </div>
+        `;
+        
+        document.body.appendChild(notification);
+        
+        // Auto-remove after 4 seconds
+        setTimeout(() => {
+          if (notification.parentNode) {
+            document.body.removeChild(notification);
+          }
+        }, 4000);
+      };
+      
+      // Function to show auto-add error
+      const showAutoAddError = (fileName, errorMsg) => {
+        const notification = document.createElement('div');
+        notification.style.position = 'fixed';
+        notification.style.top = '20px';
+        notification.style.right = '20px';
+        notification.style.backgroundColor = '#f44336';
+        notification.style.color = 'white';
+        notification.style.padding = '15px 20px';
+        notification.style.borderRadius = '6px';
+        notification.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
+        notification.style.zIndex = '10001';
+        notification.style.fontSize = '14px';
+        notification.style.fontWeight = 'bold';
+        notification.style.maxWidth = '300px';
+        notification.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <svg fill="white" width="20" height="20" viewBox="0 0 24 24">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+            </svg>
+            <div>
+              <div>Failed to auto-add:</div>
+              <div style="font-weight: normal; opacity: 0.9;">${fileName}</div>
+              <div style="font-weight: normal; opacity: 0.7; font-size: 12px;">You can add it manually</div>
+            </div>
+          </div>
+        `;
+        
+        document.body.appendChild(notification);
+        
+        // Auto-remove after 6 seconds
+        setTimeout(() => {
+          if (notification.parentNode) {
+            document.body.removeChild(notification);
+          }
+        }, 6000);
+      };
       
       // Create overlay container
       const overlay = document.createElement('div');
@@ -3913,6 +4036,13 @@ We kindly request that the chargeback be reversed in favor of our company.
       
       // Initial preview update
       updatePreview();
+      
+      // Auto-fetch files based on selected causes after modal is ready
+      setTimeout(() => {
+        autoFetchFiles().catch(error => {
+          console.error('Error in auto-fetch process:', error);
+        });
+      }, 500); // Small delay to ensure modal is fully rendered
       
       // CLOSE
       closeBtn.addEventListener('click', () => {
