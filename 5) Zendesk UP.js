@@ -317,7 +317,6 @@
       "Cargo – Daños",
       "Cargo - Asistencia",
       "Cargo - Abandono",
-      "Cargo – Cancelación NR",
       "Cargo – Limpieza",
       "Cargo – Combustible",
       "Cargo – Kilometraje",
@@ -337,7 +336,6 @@
       "Cargo – Daños": "Charge - Damages",
       "Cargo - Asistencia": "Charge - Assistance",
       "Cargo - Abandono": "Charge - Vehicle Abandonment",
-      "Cargo – Cancelación NR": "Charge - Non-Refundable Cancellation",
       "Cargo – Limpieza": "Charge - Cleaning Fee",
       "Cargo – Combustible": "Charge - Fuel",
       "Cargo – Kilometraje": "Charge - Excess Mileage",
@@ -464,41 +462,7 @@
   We have attached the rental documentation and any evidence (e.g., photographs or notes from our recovery team) confirming that the vehicle was not returned correctly, thereby necessitating towing or other recovery measures.
   We are available for any further clarifications.
   `.trim(),
-  
-      "Cargo – Cancelación NR": `We would like to inform you that the charge in question corresponds to a booking made by our mutual customer through our website (https://okmobility.com/es/rent/). In this case, the customer selected a rate clearly identified in our General Terms and Conditions as non-cancellable and/or non-refundable, which does not allow changes or cancellations, except in duly accredited cases of force majeure.
-  
-  1. Choice of Non-Refundable Rate
 
-According to our General Terms and Conditions, publicly available on our website, any non-refundable rate does not allow reimbursement once the booking is confirmed, unless a strictly documented force majeure situation applies. This condition is explicitly displayed during the booking process and reiterated in the cancellation policy section.
- 
-2. Customer's Explicit Consent
-
-By choosing the non-refundable rate, the customer explicitly agreed to its conditions:
--> No right to cancellation and no refund.
--> This policy is clearly displayed during the booking process and reiterated in the Rental Agreement.
--> The booking conditions were accepted by the customer before proceeding with the payment.
-
-3. Legal Framework and Regulatory Support
-
-This policy is fully supported by both national and European regulations:
-Article 103.l of the Spanish General Law for the Defence of Consumers and Users (as amended by Law 3/2014 of 27 March) establishes that the right of withdrawal does not apply to vehicle rental contracts with a specific date or period of execution.
-Article 16.l of Directive 2011/83/EU of the European Parliament and of the Council contains the same exception for vehicle rentals contracted for specific dates.
-
-4. Cancellation/Refund Limitations
-
-As stated in our General Terms and Conditions, all cancellations must be requested prior to the start date of the rental through the official channels provided. Non-refundable bookings are not subject to reimbursement. Any exception (e.g., force majeure) must be duly documented and evaluated according to the policy terms.
- 
-5. Attached Documentation
-
-For your reference, we have attached:
--> A copy of the General Terms and Conditions accepted by the customer before completing the booking.
--> Screenshots showing the full booking process as seen by the customer in our website (https://okmobility.com/es/rent/), highlighting where the non-refundable conditions are displayed and accepted.
--> The customer’s signed booking confirmation, indicating the selected rate type and the corresponding non-refundable clause.
-As the customer has not provided any evidence of a force majeure circumstance, we confirm that the charge was correctly applied, the conditions were clearly communicated and accepted during the booking process, and the policy is in full compliance with the applicable legal and contractual framework.
- 
-We therefore request that this chargeback be dismissed in favour of our company. We remain at your disposal for any further clarification.
-  `.trim(),
-  
       "Cargo – Limpieza": `Referring to the disputed cleaning fee charge, please note the following:
   1. Condition of the Vehicle Upon Return
   According to point 4.2 of our General Conditions, the Lessee is required to return the vehicle in a reasonably clean condition, both inside and outside. If the vehicle is returned requiring extraordinary cleaning (e.g., excessive dirt, garbage, stains, strong odors, etc.), an additional fee is charged.
@@ -4174,6 +4138,7 @@ We kindly request that the chargeback be reversed in favor of our company.
   
 
   })();
+
 
 
 
