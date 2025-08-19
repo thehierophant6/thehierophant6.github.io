@@ -326,7 +326,7 @@
       "Cargo – After Hours",
       "Cargo – OPC/CAR",
       "Cargo - Upselling",
-      "NO SHOW",  
+      "NO SHOW - Reembolsable",  
       "Reserva disfrutada",
       "Reserva NR",
       "Retención"
@@ -346,7 +346,7 @@
       "Cargo – After Hours": "Charge - After Hours Service",
       "Cargo – OPC/CAR": "Charge - Premium Coverage/Roadside Assistance",
       "Cargo - Upselling": "Charge - Vehicle Upgrade",
-      "NO SHOW": "NO SHOW",
+      "NO SHOW - Reembolsable": "NO SHOW - Reembolsable",
       "Reserva disfrutada": "Used Reservation",
       "Reserva NR": "Non-Refundable Reservation",
       "Retención": "Deposit Hold"
@@ -581,7 +581,7 @@ We therefore request that this chargeback be dismissed in favour of our company.
   We apologize for any inconvenience caused. Should you have any further questions or require additional information, we remain at your disposal.
   `.trim(),
 
-      "NO SHOW": `We are writing in response to the chargeback request regarding booking reference, in which the customer did not collect the reserved vehicle on the scheduled pick-up date (“No Show”).
+      "NO SHOW - Reembolsable": `We are writing in response to the chargeback request regarding booking reference, in which the customer did not collect the reserved vehicle on the scheduled pick-up date (“No Show”).
   According to our <strong>General Terms and Conditions</strong>, specifically section <strong>23. Política de cancelación</strong>, all cancellations must be communicated by the customer <strong>before the rental start date</strong> through the official channels provided. In the case of our <strong>Premium Rate (section 8.1.1.)</strong>, cancellations can be made without additional cost <strong>up until the start of the agreed rental period</strong>. 
 
   Our records confirm that:
@@ -3998,6 +3998,7 @@ We therefore request that this chargeback be dismissed in favour of our company.
   
 
   })();
+
 
 
 
