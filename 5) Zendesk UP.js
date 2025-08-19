@@ -581,43 +581,42 @@ We therefore request that this chargeback be dismissed in favour of our company.
   We apologize for any inconvenience caused. Should you have any further questions or require additional information, we remain at your disposal.
   `.trim(),
 
-      "NO SHOW - Reembolsable": `We are writing in response to the chargeback request regarding booking reference you can find in the attachments, in which [strong]the customer did not collect the reserved vehicle on the scheduled pick-up date (“No Show”).[/strong]
+      "NO SHOW - Reembolsable": `We are writing in response to the chargeback request regarding booking reference you can find in the attachments, in which <strong>the customer did not collect the reserved vehicle on the scheduled pick-up date (“No Show”).</strong>
  
 According to our General Terms and Conditions, specifically section 23 "(Política de cancelación)", all cancellations must be communicated by the customer before the rental start date through the official channels provided. In the case of our "Premium" and "Standard" refundable rates (section 8.1.1. and 8.1.3.), cancellations can be made without additional cost up until the start of the agreed rental period.
  
 Our records confirm that:
 
--> [strong]The customer did not contact us prior to the agreed rental start date to cancel the booking.[/strong]
--> [strong]The pick-up date passed without the vehicle being collected.[/strong]
+-> <strong>The customer did not contact us prior to the agreed rental start date to cancel the booking.</strong><br>
+-> <strong>The pick-up date passed without the vehicle being collected.</strong><br>
 -> No exceptional “force majeure” circumstance, as defined in our Terms and Conditions, has been communicated or accredited.
 
 Additionally, during the booking process, the customer was explicitly informed of the cancellation policy for both Premium and Standard refundable rates. The policy clearly states that a refund is only applicable if the customer cancels before the rental start date through the official channels. We are attaching a PDF document with screenshots of the booking process, showing the exact information displayed to the customer, including:
 
--> The distinction between "Premium" and "Standard" refundable rates.
--> The cancellation conditions applicable to both.
--> The official channels for submitting cancellations.
--> [strong]The acceptance checkbox confirming agreement with our Terms and Conditions prior to payment.[/strong]
+-> The distinction between "Premium" and "Standard" refundable rates.<br>
+-> The cancellation conditions applicable to both.<br>
+-> The official channels for submitting cancellations.<br>
+-> <strong>The acceptance checkbox confirming agreement with our Terms and Conditions prior to payment.</strong>
 
-The booking process can also be verified directly on our official website: https://okmobility.com/en/.
+The booking process can also be verified directly on our official website: https://okmobility.com/en/.<br>
 Our Terms and Conditions are available at: https://okmobility.com/es/rent/general-conditions.
  
-[strong]Legal and Regulatory Support:[/strong]
+<strong>Legal and Regulatory Support:</strong><br><br>
 
-This policy is fully supported by both national and European regulations:
+This policy is fully supported by both national and European regulations:<br><br>
 
--> Article 103.1 of the Spanish General Law for the Defence of Consumers and Users (as amended by Law 3/2014 of 27 March) establishes that the right of withdrawal does not apply to vehicle rental contracts with a specific date or period of execution.
--> Article 16.l of Directive 2011/83/EU of the European Parliament and of the Council contains the same exception for vehicle rentals contracted for specific dates.
+-> Article 103.1 of the Spanish General Law for the Defence of Consumers and Users (as amended by Law 3/2014 of 27 March) establishes that the right of withdrawal does not apply to vehicle rental contracts with a specific date or period of execution.<br>
+-> Article 16.l of Directive 2011/83/EU of the European Parliament and of the Council contains the same exception for vehicle rentals contracted for specific dates.<br><br>
 
-As per these conditions, [strong]once the rental start date has passed without a cancellation request, no refund is applicable.[/strong] 
+As per these conditions, <strong>once the rental start date has passed without a cancellation request, no refund is applicable.</strong><br>
 The refundable rate flexibility only applies if the customer notifies us before the agreed pick-up date.
  
-For these reasons, [strong]the transaction is valid and in full compliance with the conditions the customer accepted at the time of booking.[/strong]
+For these reasons, <strong>the transaction is valid and in full compliance with the conditions the customer accepted at the time of booking.</strong><br><br>
 
-We have attached to this case:
+We have attached to this case:<br><br>
 
-1. A copy of our General Terms and Conditions.
-2. The full reservation documentation.
-3. A PDF with screenshots of the booking process as seen by the customer, proving acceptance of the cancellation policy prior to payment.
+1. The full reservation documentation.<br>
+2. A PDF with screenshots of the booking process as seen by the customer, proving acceptance of the cancellation policy prior to payment.<br><br>
 
 We kindly request that the chargeback be reversed in favor of our company.
 `.trim(),
@@ -4175,6 +4174,7 @@ We kindly request that the chargeback be reversed in favor of our company.
   
 
   })();
+
 
 
 
