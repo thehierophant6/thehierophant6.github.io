@@ -3212,7 +3212,7 @@ We kindly request that the chargeback be reversed in favor of our company.
       const SOLICITUD_PREFIX   = 'solicituddocumentacion';   // en minúsculas para comparar (detecta tanto "solicituddocumentacion" como "solicituddocumentacionadicional")
       
       // GitHub repository URL for automatic file fetching
-      const GITHUB_BASE_URL = 'https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/'; // Replace with your actual GitHub repo URL
+      const GITHUB_BASE_URL = 'https://thehierophant6.github.io/'; // GitHub Pages URL for thehierophant6
       
       // Create a File object for the cover page
       const coverPageFile = new File(
@@ -3257,8 +3257,34 @@ We kindly request that the chargeback be reversed in favor of our company.
         if (selectedCauses.includes("NO SHOW - Reembolsable")) {
           try {
             console.log("NO SHOW - Reembolsable detected, auto-fetching Tarifas reembolsables PDF...");
-            const tarifasUrl = GITHUB_BASE_URL + 'Tarifas%20reembolsables%201.pdf'; // URL encode the filename
-            const tarifasFile = await fetchGitHubPDF(tarifasUrl, 'Tarifas reembolsables 1.pdf');
+            
+            // Try multiple URL formats for maximum compatibility
+            const urlsToTry = [
+              GITHUB_BASE_URL + 'Tarifas%20reembolsables%201.pdf', // GitHub Pages URL
+              'https://raw.githubusercontent.com/thehierophant6/thehierophant6.github.io/main/Tarifas%20reembolsables%201.pdf', // Raw GitHub main branch
+              'https://raw.githubusercontent.com/thehierophant6/thehierophant6.github.io/master/Tarifas%20reembolsables%201.pdf' // Raw GitHub master branch
+            ];
+            
+            let tarifasFile = null;
+            let lastError = null;
+            
+            // Try each URL until one works
+            for (const url of urlsToTry) {
+              try {
+                console.log(`Trying URL: ${url}`);
+                tarifasFile = await fetchGitHubPDF(url, 'Tarifas reembolsables 1.pdf');
+                console.log(`Success with URL: ${url}`);
+                break; // Success, exit the loop
+              } catch (err) {
+                console.warn(`Failed with URL ${url}:`, err.message);
+                lastError = err;
+                continue; // Try next URL
+              }
+            }
+            
+            if (!tarifasFile) {
+              throw lastError || new Error('All URL attempts failed');
+            }
             
             // Add the file to selectedFiles (it will be placed after the locked pages)
             selectedFiles.push(tarifasFile);
