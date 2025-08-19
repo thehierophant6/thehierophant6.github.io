@@ -326,6 +326,7 @@
       "Cargo – After Hours",
       "Cargo – OPC/CAR",
       "Cargo - Upselling",
+      "NO SHOW",  
       "Reserva disfrutada",
       "Reserva NR",
       "Retención"
@@ -345,6 +346,7 @@
       "Cargo – After Hours": "Charge - After Hours Service",
       "Cargo – OPC/CAR": "Charge - Premium Coverage/Roadside Assistance",
       "Cargo - Upselling": "Charge - Vehicle Upgrade",
+      "NO SHOW": "NO SHOW",
       "Reserva disfrutada": "Used Reservation",
       "Reserva NR": "Non-Refundable Reservation",
       "Retención": "Deposit Hold"
@@ -578,7 +580,27 @@ We therefore request that this chargeback be dismissed in favour of our company.
   Since you enjoyed the upgraded vehicle throughout your rental period, we regret to inform you that no reimbursement is applicable for services already provided and utilized.
   We apologize for any inconvenience caused. Should you have any further questions or require additional information, we remain at your disposal.
   `.trim(),
-  
+
+      "NO SHOW": `We are writing in response to the chargeback request regarding booking reference, in which the customer did not collect the reserved vehicle on the scheduled pick-up date (“No Show”).
+  According to our <strong>General Terms and Conditions</strong>, specifically section <strong>23. Política de cancelación</strong>, all cancellations must be communicated by the customer <strong>before the rental start date</strong> through the official channels provided. In the case of our <strong>Premium Rate (section 8.1.1.)</strong>, cancellations can be made without additional cost <strong>up until the start of the agreed rental period</strong>. 
+
+  Our records confirm that:
+
+    1. The customer <strong>did not contact us prior to the agreed rental start date</strong> to cancel the booking.
+    2. The pick-up date passed without the vehicle being collected.
+    3. No exceptional “force majeure” circumstance, as defined in our Terms and Conditions, has been communicated or accredited.
+
+  Our Terms and Conditions are <strong>publicly available on our website</strong> at https://okmobility.com/es/rent/general-conditions, and are <strong>made available to the customer and accepted before confirming the booking and processing the payment.</strong>
+ 
+  As per these conditions, once the rental start date has passed without a cancellation request, <strong>no refund is applicable.</strong> The Premium Rate cancellation flexibility only applies if the customer notifies us before the agreed pick-up date.
+ 
+  For these reasons, the transaction is valid and in full compliance with the conditions the customer accepted at the time of booking.
+ 
+  <strong>We have attached to this case a copy of our General Terms and Conditions and the full reservation documentation for your reference.</strong>
+ 
+  We kindly request that the chargeback be reversed in favor of our company.
+`.trim(),
+        
       "Reserva disfrutada": `We are writing regarding the customer's refund request for a reservation that was fully used:
   1. Service Fulfillment
   According to our records and rental documentation, the customer proceeded with vehicle pickup (Check-Out) and utilized the booked rental. Therefore, the service was rendered in full, as outlined in point 2 of our General Conditions regarding the rental period and proper Check-In/Check-Out procedures.
@@ -3976,5 +3998,6 @@ We therefore request that this chargeback be dismissed in favour of our company.
   
 
   })();
+
 
 
