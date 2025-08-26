@@ -597,16 +597,29 @@ We kindly request that the chargeback be reversed in favor of our company.
   We trust this clarifies the reason no refund can be issued. We remain at your disposal for any further questions.
   `.trim(),
   
-      "Reserva NR": `We refer to the customer's request to cancel a non-refundable booking. Below are the relevant points:
-  1. Non-Refundable Rate Selection
-  In point 8.1.4 of our General Conditions, it specifies our Lite Rate (or another designated non-refundable rate) does not permit refunds or changes once the booking is confirmed.
-  2. Cancellation Policy
-  As highlighted in point 22 (Cancellation Policy) of the T&C, no refunds are issued for non-refundable bookings. This is clearly indicated at the time of reservation and accepted by the customer when finalizing the booking.
-  3. Explicit Acknowledgment
-  During the reservation process (either online or in-store), the customer was informed of the non-refundable nature of this rate. Proceeding with the booking means the customer explicitly agreed to these terms.
-  4. Documentation
-  Please see attached the booking confirmation and rate details reflecting the non-refundable policy and the customer's acceptance.
-  In light of the above, we regret that no refund can be issued. We are available for any additional clarification.
+      "Reserva NR": `We would like to inform you that the charge in question corresponds to a booking made by our mutual customer through our website. In this case, the customer selected a <strong>rate clearly identified in our General Terms and Conditions as non-cancellable and/or non-refundable</strong>, which does not allow changes or cancellations, except in duly accredited cases of force majeure.
+  1. <strong>Choice of Non-Refundable Rate</strong>
+  According to our <strong>General Terms and Conditions</strong>, publicly available on our website (https://okmobility.com/es/rent/general-conditions), any non-refundable rate does not allow reimbursement once the booking is confirmed, unless a strictly documented force majeure situation applies. This condition is explicitly displayed during the booking process and reiterated in the cancellation policy section.
+  2. <strong>Customer's Explicit Consent</strong>
+  By choosing the non-refundable rate, the customer explicitly agreed to its conditions:
+  -> No right cancellation and no refund.
+  -> This policy is clearly displayed during the booking process and reiterated in the Rental Agreement.
+  -> The booking conditions were accepted by the customer before proceeding with the payment.
+  3. <strong>Legal Framework and Regulatory Support</strong>
+  This policy is fully supported by both national and European regulations:
+  -> <strong>Article 103.l</strong> of the Spanish General Law for the Defence of Consumers and Users (as amended by Law 3/2014 of 27 March) establishes that the right of withdrawal does not apply to vehicle rental contracts with a specific date or period of execution.
+  -> <strong>Article 16.l</strong> of Directive 2011/83/EU of the European Parliament and of the Council contains the same exception for vehicle rentals contracted for specific dates.
+  4. <strong>Cancellation/Refund Limitations</strong>
+  As stated in our General Terms and Conditions, all cancellations must be requested prior to the start date of the rental through the official channels provided. Non-refundable bookings are not subject to reimbursement. Any exception (e.g., force majeure) must be duly documented and evaluated according to the policy terms.
+  5. <strong>Attached Documentation</strong>
+  For your reference, we have attached:
+  -> A copy of the General Terms and Conditions accepted by the customer before completing the booking.
+  -> <strong>Screenshots showing the full booking process</strong> (https://okmobility.com/en/) as seen by the customer, highlighting where the non-refundable conditions are displayed and accepted.
+  -> The customer’s signed booking confirmation, indicating the selected rate type and the corresponding non-refundable clause.
+  
+  As the customer has not provided any evidence of a force majeure circumstance, we confirm that the charge was correctly applied, the conditions were clearly communicated and accepted during the booking process, and the policy is in full compliance with the applicable legal and contractual framework.
+
+  We therefore request that this chargeback be dismissed in favour of our company. We remain at your disposal for any further clarification.
   `.trim(),
   
       "Retención": `Regarding the customer's concern over the preauthorized (blocked) amount on their payment card:
@@ -4138,6 +4151,7 @@ We kindly request that the chargeback be reversed in favor of our company.
   
 
   })();
+
 
 
 
