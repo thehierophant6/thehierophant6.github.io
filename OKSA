@@ -1,0 +1,174 @@
+// ==UserScript==
+// @name         OK SA
+// @namespace    okmobility
+// @version      0.1.0
+// @description  Presencia y actividad real (Zendesk/No-Zendesk) con atribución a ticket.
+// @match        *://*/*
+// @grant        none
+// ==/UserScript==
+(() => {
+  // ====== CONFIG ======
+  const BACKEND = 'https://oksmartaudit-ajehbzfzdyg4e9hd.westeurope-01.azurewebsites.net'; // <-- tu Function URL (sin / al final)
+  const HEARTBEAT_MS = 30_000;      // beacon cada ~30 s (con jitter)
+  const JITTER_MS    = 2_000;       // ±2 s
+  const IDLE_MS      = 60_000;      // inactividad >=60 s => IDLE
+  const REF_TICKET_TTL_MS = 7 * 60_000; // atribución de lectura al último ticket durante 7 min
+  const ZD_HOST_RE   = /\.zendesk\.com$/i;
+  const DEBUG        = false;       // pon true si quieres ver logs en consola
+
+  // ====== STATE ======
+  const LS_JWT      = 'oksmart.jwt';
+  const LS_JWT_EXP  = 'oksmart.jwt_exp';
+  const LS_TICKET   = 'oksmart.last_ticket_id';
+  const LS_TICKET_T = 'oksmart.last_ticket_exp';
+  const tabId       = crypto.randomUUID();
+
+  let lastInter = Date.now();
+  let stopLoop = false;
+  let loopTimer = null;
+  let lastPath = location.pathname;
+
+  const log = (...a) => { if (DEBUG) console.log('[OK-AUDIT]', ...a); };
+
+  // ====== HELPERS ======
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const jitter = base => base + Math.floor(Math.random()* (2*JITTER_MS)) - JITTER_MS;
+
+  const isZendesk = () => ZD_HOST_RE.test(location.hostname);
+  const visible   = () => document.visibilityState === 'visible';
+  const focused   = () => document.hasFocus();
+  const activeNow = () => visible() && focused() && (Date.now() - lastInter) < IDLE_MS;
+
+  function stateNow() {
+    if (!visible() || !focused()) return 'BG';                         // descanso (no pestaña activa)
+    if (activeNow())               return isZendesk() ? 'ZTK' : 'WEB_ACTIVA';
+    return isZendesk() ? 'IDLE_ZENDESK' : 'IDLE_WEB';                  // momentos muertos
+  }
+
+  function currentTicketIdFromPath() {
+    if (!isZendesk()) return null;
+    const m = location.pathname.match(/\/agent\/tickets\/(\d+)/);
+    return m ? m[1] : null;
+  }
+
+  function setRefTicket(id) {
+    if (!id) return;
+    localStorage.setItem(LS_TICKET, String(id));
+    localStorage.setItem(LS_TICKET_T, String(Date.now() + REF_TICKET_TTL_MS));
+    log('set ref ticket', id);
+  }
+  function getRefTicket() {
+    const exp = Number(localStorage.getItem(LS_TICKET_T) || 0);
+    if (Date.now() > exp) return null;
+    return localStorage.getItem(LS_TICKET) || null;
+  }
+  function maybeMarkTicketByPath() {
+    const tid = currentTicketIdFromPath();
+    if (tid) setRefTicket(tid);
+  }
+
+  // ====== BOOTSTRAP JWT (solo cuando estemos en Zendesk) ======
+  async function ensureJWT() {
+    const existing = localStorage.getItem(LS_JWT);
+    const exp = Number(localStorage.getItem(LS_JWT_EXP) || 0);
+    if (existing && Date.now() < exp) return existing;
+
+    if (!isZendesk()) return null; // solo podemos bootstrappear desde Zendesk (same-origin)
+
+    try {
+      const meResp = await fetch('/api/v2/users/me.json', { credentials: 'include' });
+      if (!meResp.ok) throw new Error('me.json failed');
+      const me = (await meResp.json()).user; // {id, email, name,...}
+      const r = await fetch(`${BACKEND}/auth/bootstrap`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: me.id, email: me.email, name: me.name || '' })
+      });
+      if (!r.ok) throw new Error('bootstrap failed');
+      const j = await r.json();
+      localStorage.setItem(LS_JWT, j.jwt);
+      localStorage.setItem(LS_JWT_EXP, String(Date.now() + (j.ttl_ms || 8*3600*1000)));
+      log('JWT bootstrap ok');
+      return j.jwt;
+    } catch (e) {
+      log('JWT bootstrap error', e);
+      return null;
+    }
+  }
+
+  // ====== INTERACTION HOOKS ======
+  ['mousemove','keydown','scroll','click'].forEach(ev =>
+    window.addEventListener(ev, () => { lastInter = Date.now(); }, { passive: true })
+  );
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') tick();   // fuerza un envío al volver
+  });
+
+  // Detectar cambios SPA (ruta) para refrescar ref_ticket_id
+  (function watchPath() {
+    const origPush = history.pushState;
+    const origReplace = history.replaceState;
+    function wrap(fn) {
+      return function() {
+        const ret = fn.apply(this, arguments);
+        setTimeout(() => {
+          if (location.pathname !== lastPath) {
+            lastPath = location.pathname;
+            maybeMarkTicketByPath();
+          }
+        }, 0);
+        return ret;
+      };
+    }
+    history.pushState = wrap(origPush);
+    history.replaceState = wrap(origReplace);
+    new MutationObserver(() => {
+      if (location.pathname !== lastPath) {
+        lastPath = location.pathname;
+        maybeMarkTicketByPath();
+      }
+    }).observe(document, { subtree: true, childList: true });
+  })();
+
+  // ====== SEND BEACON ======
+  function sendActivity(jwt, kind='hb') {
+    const payload = {
+      ts: new Date().toISOString(),
+      jwt,
+      kind,                        // 'hb' o 'return_visible' (informativo)
+      state: stateNow(),           // ZTK | IDLE_ZENDESK | WEB_ACTIVA | IDLE_WEB | BG
+      domain: location.hostname,
+      path: location.pathname,
+      title: (document.title || '').slice(0, 140),
+      tab_id: tabId,
+      ref_ticket_id: getRefTicket()
+    };
+    const ok = navigator.sendBeacon(`${BACKEND}/activity`, new Blob([JSON.stringify(payload)], { type: 'application/json' }));
+    if (DEBUG && !ok) console.warn('[OK-AUDIT] sendBeacon queued/throttled');
+  }
+
+  // ====== LOOP (jittered) ======
+  async function tick() {
+    const jwt = localStorage.getItem(LS_JWT) || await ensureJWT();
+    if (!jwt) return; // no enviamos hasta que el usuario haya abierto Zendesk (bootstrap)
+    // limpiar ref ticket si caducó
+    const exp = Number(localStorage.getItem(LS_TICKET_T) || 0);
+    if (exp && Date.now() > exp) localStorage.removeItem(LS_TICKET);
+
+    sendActivity(jwt, visible() ? 'hb' : 'bg');
+  }
+
+  async function loop() {
+    while (!stopLoop) {
+      await tick();
+      await sleep(jitter(HEARTBEAT_MS));
+    }
+  }
+
+  // ====== START ======
+  maybeMarkTicketByPath();   // por si ya entraste en /agent/tickets/:id
+  loop();
+
+  // En salida de página, enviamos “last seen”
+  window.addEventListener('pagehide', () => { stopLoop = true; const jwt = localStorage.getItem(LS_JWT); if (jwt) sendActivity(jwt, 'pagehide'); });
+})();
