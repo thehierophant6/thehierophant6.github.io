@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         OK Smart Audit
 // @namespace    https://okmobility.com/
-// @version      1.0.3
-// @description  Activity tracker for Zendesk agents (focus/idle robusto + state-change pings)
+// @version      1.1.0
+// @description  Activity tracker for Zendesk agents (focus/idle robusto + state-change pings con bypass CSP)
 // @author       OK Mobility
 // @match        *://*/*
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @connect      oksmartaudit-ajehbzfzdyg4e9hd.westeurope-01.azurewebsites.net
 // @run-at       document-start
 // @noframes
 // ==/UserScript==
@@ -13,10 +14,11 @@
 (function () {
   'use strict';
 
+  // --- DEBUG ---------------------------------------------------------------
   const DEBUG = false;
   const log = (...a) => { if (DEBUG) console.log('[OK Smart Audit]', ...a); };
 
-  // Config
+  // --- CONFIG --------------------------------------------------------------
   const CONFIG = {
     BACKEND_URL: 'https://oksmartaudit-ajehbzfzdyg4e9hd.westeurope-01.azurewebsites.net/api',
     HEARTBEAT_MS: 30000,         // latido base
@@ -28,7 +30,7 @@
     STATE_MIN_INTERVAL_MS: 1500  // anti-flood entre pings de cambio de estado
   };
 
-  // Estado
+  // --- STATE ---------------------------------------------------------------
   const state = {
     jwt: null,
     userId: null,
@@ -46,7 +48,7 @@
     lastStateEmitAt: 0
   };
 
-  // Utils
+  // --- UTILS ---------------------------------------------------------------
   function genTabId() { return 'tab_' + Math.random().toString(36).slice(2, 11) + '_' + Date.now(); }
   function jitter(ms) { return Math.max(1000, ms + (Math.random() - 0.5) * 2 * CONFIG.JITTER_MS); }
   function isZendesk() { return CONFIG.ZD_HOST_REGEX.test(location.hostname); }
@@ -55,20 +57,59 @@
   function lsGet(k, d=null) { try { const s = localStorage.getItem(lsKey(k)); return s ? JSON.parse(s) : d; } catch { return d; } }
   function lsDel(k) { try { localStorage.removeItem(lsKey(k)); } catch {} }
 
-  // Ticket helpers
-  function extractTicketId() { const m = location.pathname.match(/\/agent\/tickets\/(\d+)/); return m ? parseInt(m[1], 10) : null; }
+  // POST JSON con bypass CSP (GM_xmlhttpRequest) o fetch fallback
+  async function postJSON(url, body) {
+    return new Promise((resolve, reject) => {
+      if (typeof GM_xmlhttpRequest === 'function') {
+        GM_xmlhttpRequest({
+          method: 'POST',
+          url,
+          headers: { 'Content-Type': 'application/json' },
+          data: JSON.stringify(body),
+          onload: (r) => {
+            try {
+              const json = (r.responseText ? JSON.parse(r.responseText) : {});
+              resolve({ status: r.status, json });
+            } catch (e) { reject(e); }
+          },
+          onerror: (e) => reject(e)
+        });
+      } else {
+        fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          keepalive: true,
+          mode: 'cors',
+          credentials: 'omit',
+        }).then(async res => {
+          let j = {};
+          try { j = await res.json(); } catch {}
+          resolve({ status: res.status, json: j });
+        }).catch(reject);
+      }
+    });
+  }
+
+  // --- TICKETS -------------------------------------------------------------
+  function extractTicketId() {
+    const m = location.pathname.match(/\/agent\/tickets\/(\d+)/);
+    return m ? parseInt(m[1], 10) : null;
+  }
   function updateTicketRef() {
     const tid = extractTicketId();
     if (tid && tid !== state.lastTicketId) {
       state.lastTicketId = tid;
       state.lastTicketExpiry = Date.now() + CONFIG.REF_TICKET_TTL_MS;
       log('ticket ref', tid);
-      emitStateIfChanged(true); // corta segmento ZTK a ticket correcto ASAP
+      emitStateIfChanged(true); // corta segmento ZTK al ticket correcto ASAP
     }
   }
-  function currentTicketId() { return (state.lastTicketId && Date.now() < state.lastTicketExpiry) ? state.lastTicketId : null; }
+  function currentTicketId() {
+    return (state.lastTicketId && Date.now() < state.lastTicketExpiry) ? state.lastTicketId : null;
+  }
 
-  // Estado lógico actual
+  // --- STATE MACHINE -------------------------------------------------------
   function getCurrentState() {
     const idle = (Date.now() - state.lastActivity) >= CONFIG.IDLE_MS;
     if (!state.isVisible || !state.hasFocus) return 'BG';                    // pestaña oculta o sin foco
@@ -76,7 +117,7 @@
     return idle ? 'IDLE_WEB' : 'WEB_ACTIVA';                                 // foco + otra web
   }
 
-  // AUTENTICACIÓN
+  // --- AUTH ----------------------------------------------------------------
   function loadAuth() {
     const jwt = lsGet('jwt', null);
     const exp = lsGet('jwtExpiry', 0);
@@ -93,20 +134,27 @@
   async function bootstrapAuth() {
     if (!isZendesk()) return false;
     try {
+      // Esto es same-origin y no requiere bypass CSP
       const r = await fetch('/api/v2/users/me.json', { credentials: 'same-origin' });
       if (!r.ok) throw new Error('me ' + r.status);
       const { user } = await r.json();
-      const b = await fetch(`${CONFIG.BACKEND_URL}/auth/bootstrap`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id, email: user.email, name: user.name })
+
+      // Bootstrap contra backend con GM_xmlhttpRequest
+      const res = await postJSON(`${CONFIG.BACKEND_URL}/auth/bootstrap`, {
+        user_id: user.id, email: user.email, name: user.name
       });
-      if (!b.ok) throw new Error('bootstrap ' + b.status);
-      const data = await b.json();
-      state.jwt = data.jwt;
-      state.jwtExpiry = Date.now() + (data.ttl_ms || 0);
+      if (res.status !== 200 || !res.json || !res.json.jwt) {
+        throw new Error('bootstrap ' + res.status);
+      }
+
+      state.jwt = res.json.jwt;
+      state.jwtExpiry = Date.now() + (res.json.ttl_ms || 0);
       state.userId = user.id;
-      lsSet('jwt', state.jwt); lsSet('jwtExpiry', state.jwtExpiry); lsSet('userId', state.userId);
+
+      lsSet('jwt', state.jwt);
+      lsSet('jwtExpiry', state.jwtExpiry);
+      lsSet('userId', state.userId);
+
       log('bootstrap ok', { uid: user.id });
       return true;
     } catch (e) {
@@ -115,11 +163,11 @@
     }
   }
 
-  // Envío de pings
+  // --- PINGS ---------------------------------------------------------------
   async function sendPing(kind = 'hb', force = false) {
     if (!state.jwt || Date.now() >= state.jwtExpiry) return;
-    const cur = getCurrentState();
 
+    const cur = getCurrentState();
     // Anti-flood para pings de cambio de estado
     if (kind === 'state' && !force) {
       const now = Date.now();
@@ -143,35 +191,32 @@
     };
 
     try {
-      const ok = navigator.sendBeacon(
-        `${CONFIG.BACKEND_URL}/activity`,
-        new Blob([JSON.stringify(payload)], { type: 'application/json' })
-      );
-      if (!ok) throw new Error('sendBeacon=false');
+      // SIEMPRE vía GM_xmlhttpRequest (bypass CSP). Fetch solo como fallback.
+      const res = await postJSON(`${CONFIG.BACKEND_URL}/activity`, payload);
+      if (res.status !== 200) throw new Error('activity ' + res.status);
       log('ping', { kind: payload.kind, st: payload.state, tid: payload.ref_ticket_id });
-    } catch {
-      try {
-        const r = await fetch(`${CONFIG.BACKEND_URL}/activity`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload), keepalive: true
-        });
-        if (!r.ok) throw new Error('http ' + r.status);
-        log('ping/fetch', { kind: payload.kind, st: payload.state });
-      } catch (err) {
-        log('ping fail', err);
-      }
+    } catch (err) {
+      log('ping fail', err);
     }
   }
 
   function startHeartbeat() {
     stopHeartbeat();
-    const tick = () => { sendPing('hb'); state.hbTimer = setTimeout(tick, jitter(CONFIG.HEARTBEAT_MS)); };
+    const tick = () => {
+      sendPing('hb');
+      state.hbTimer = setTimeout(tick, jitter(CONFIG.HEARTBEAT_MS));
+    };
     state.hbTimer = setTimeout(tick, jitter(CONFIG.HEARTBEAT_MS));
     log('hb start');
   }
-  function stopHeartbeat() { if (state.hbTimer) { clearTimeout(state.hbTimer); state.hbTimer = null; log('hb stop'); } }
+  function stopHeartbeat() {
+    if (state.hbTimer) {
+      clearTimeout(state.hbTimer);
+      state.hbTimer = null;
+      log('hb stop');
+    }
+  }
 
-  // Emisión inmediata si el estado cambia (focus/visibility/idle)
   function emitStateIfChanged(force=false) {
     const cur = getCurrentState();
     if (state.lastSentState !== cur || force) {
@@ -179,7 +224,7 @@
     }
   }
 
-  // Idle watcher: dispara 'state' al entrar en idle
+  // --- IDLE WATCHER --------------------------------------------------------
   function resetIdleTimer() {
     if (state.idleTimer) clearTimeout(state.idleTimer);
     const due = state.lastActivity + CONFIG.IDLE_MS - Date.now();
@@ -187,10 +232,10 @@
     state.idleTimer = setTimeout(() => {
       // Entra a estado IDLE_* (o BG si perdió foco entretanto)
       emitStateIfChanged(true);
-    }, wait + 10); // pequeño margen
+    }, wait + 10);
   }
 
-  // Listeners
+  // --- LISTENERS -----------------------------------------------------------
   function trackActivity() {
     state.lastActivity = Date.now();
     resetIdleTimer();
@@ -199,9 +244,8 @@
   }
 
   function setupActivityListeners() {
-    ['mousedown','mousemove','keydown','scroll','touchstart','pointerdown','pointermove','wheel'].forEach(ev =>
-      document.addEventListener(ev, trackActivity, { passive: true })
-    );
+    ['mousedown','mousemove','keydown','scroll','touchstart','pointerdown','pointermove','wheel']
+      .forEach(ev => document.addEventListener(ev, trackActivity, { passive: true }));
 
     document.addEventListener('visibilitychange', () => {
       state.isVisible = !document.hidden;
@@ -215,7 +259,7 @@
     window.addEventListener('pagehide',      () => { sendPing('pagehide', true); });
   }
 
-  // SPA hooks (Zendesk)
+  // --- SPA HOOKS (Zendesk) -------------------------------------------------
   function setupSPAHooks() {
     const oPush = history.pushState, oReplace = history.replaceState;
     history.pushState = function(...a){ oPush.apply(this, a); setTimeout(updateTicketRef, 100); };
@@ -230,7 +274,7 @@
     }
   }
 
-  // Init
+  // --- INIT ----------------------------------------------------------------
   async function initialize() {
     log('init…');
     state.isZendesk = isZendesk();
@@ -259,9 +303,10 @@
     setTimeout(initialize, 50);
   }
 
-  // Solo expone info no sensible
+  // --- DEBUG API (no expone JWT) ------------------------------------------
   window.okSmartAudit = {
     ping: () => sendPing('manual', true),
+    bootstrap: () => bootstrapAuth(),
     stateInfo: () => ({
       authed: !!state.jwt,
       tab: state.tabId,
