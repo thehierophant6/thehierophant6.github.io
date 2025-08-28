@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         OK Smart Audit
 // @namespace    https://okmobility.com/
-// @version      1.0.1
-// @description  Activity tracker for Zendesk agents (cross-domain safe)
+// @version      1.0.2
+// @description  Activity tracker for Zendesk agents (safe + cross-domain with GM APIs, graceful fallback)
 // @author       OK Mobility
 // @match        *://*/*
-// @grant        GM_getValue
-// @grant        GM_setValue
-// @grant        GM_addValueChangeListener
-// @grant        GM_removeValueChangeListener
+// @grant        GM.getValue
+// @grant        GM.setValue
+// @grant        GM.addValueChangeListener
+// @grant        GM.removeValueChangeListener
 // @run-at       document-start
 // @noframes
 // ==/UserScript==
@@ -16,8 +16,8 @@
 (function () {
   'use strict';
 
+  // ---------- Config ----------
   const DEBUG = false;
-
   const CONFIG = {
     BACKEND_URL: 'https://oksmartaudit-ajehbzfzdyg4e9hd.westeurope-01.azurewebsites.net/api',
     HEARTBEAT_MS: 30000,
@@ -26,33 +26,32 @@
     REF_TICKET_TTL_MS: 7 * 60 * 1000,
     ZD_HOST_REGEX: /\.zendesk\.com$/,
     STORAGE_PREFIX: 'ok_smart_audit_',
-    // (Opcional) bloquear dominios sensibles:
-    // BLOCKLIST: [/^mail\.google\.com$/, /^bank\./]
-    BLOCKLIST: []
+    BLOCKLIST: [] // ej: [/^mail\.google\.com$/]
   };
 
   // ---------- Utils ----------
-  const log = (...args) => { if (DEBUG) console.log('[OK Smart Audit]', ...args); };
-
+  const log = (...a) => { if (DEBUG) console.log('[OK Smart Audit]', ...a); };
+  const now = () => Date.now();
   const jitter = (ms) => Math.max(1000, ms + (Math.random() - 0.5) * 2 * CONFIG.JITTER_MS);
   const isZendesk = () => CONFIG.ZD_HOST_REGEX.test(location.hostname);
   const inBlocklist = () => CONFIG.BLOCKLIST.some(rx => rx.test(location.hostname));
-
-  const now = () => Date.now();
   const genTabId = () => 'tab_' + Math.random().toString(36).slice(2, 11) + '_' + now();
 
-  // localStorage helpers (scoped por dominio)
+  const hasGM = typeof GM === 'object' && GM && (
+    typeof GM.getValue === 'function' &&
+    typeof GM.setValue === 'function'
+  );
+
+  // localStorage helpers (por dominio)
   const lsKey = (k) => CONFIG.STORAGE_PREFIX + k;
   const lsSet = (k, v) => { try { localStorage.setItem(lsKey(k), JSON.stringify(v)); } catch {} };
   const lsGet = (k, d=null) => { try { const s = localStorage.getItem(lsKey(k)); return s ? JSON.parse(s) : d; } catch { return d; } };
   const lsDel = (k) => { try { localStorage.removeItem(lsKey(k)); } catch {} };
 
-  // GM storage (global por script, ideal para compartir JWT entre dominios)
-  const gmSet = (k, v) => GM_setValue(CONFIG.STORAGE_PREFIX + k, v);
-  const gmGet = (k, d=null) => {
-    const v = GM_getValue(CONFIG.STORAGE_PREFIX + k);
-    return (v === undefined ? d : v);
-  };
+  // GM helpers (global script storage, cross-domain)
+  const gmKey = (k) => CONFIG.STORAGE_PREFIX + k;
+  const gmSet = async (k, v) => { if (hasGM) return GM.setValue(gmKey(k), v); };
+  const gmGet = async (k, d=null) => hasGM ? GM.getValue(gmKey(k), d) : d;
 
   // ---------- State ----------
   const state = {
@@ -74,7 +73,6 @@
     const m = location.pathname.match(/\/agent\/tickets\/(\d+)/);
     return m ? parseInt(m[1], 10) : null;
   };
-
   const updateTicketRef = () => {
     const tid = extractTicketId();
     if (tid && tid !== state.lastTicketId) {
@@ -83,26 +81,25 @@
       log('ticket ref', tid);
     }
   };
+  const currentTicketId = () =>
+    (state.lastTicketId && now() < state.lastTicketExpiry) ? state.lastTicketId : null;
 
-  const currentTicketId = () => (state.lastTicketId && now() < state.lastTicketExpiry) ? state.lastTicketId : null;
-
-  // ---------- Auth (JWT) ----------
-  // Carga preferentemente de GM storage (cross-domain)
-  function loadAuth() {
-    // 1) GM (global)
-    const gjwt = gmGet('jwt', null);
-    const gexp = gmGet('jwtExpiry', 0);
-    const guid = gmGet('userId', null);
-
-    if (gjwt && gexp > now()) {
-      state.jwt = gjwt;
-      state.jwtExpiry = gexp;
-      state.userId = guid;
-      log('JWT loaded from GM', { userId: state.userId });
-      return true;
+  // ---------- Auth ----------
+  async function loadAuth() {
+    // 1) GM (global cross-domain)
+    if (hasGM) {
+      const gjwt = await gmGet('jwt', null);
+      const gexp = await gmGet('jwtExpiry', 0);
+      const guid = await gmGet('userId', null);
+      if (gjwt && gexp > now()) {
+        state.jwt = gjwt;
+        state.jwtExpiry = gexp;
+        state.userId = guid;
+        log('JWT from GM', { userId: state.userId });
+        return true;
+      }
     }
-
-    // 2) Fallback: localStorage (solo mismo dominio)
+    // 2) localStorage (mismo dominio)
     const sjwt = lsGet('jwt', null);
     const sexp = lsGet('jwtExpiry', 0);
     const suid = lsGet('userId', null);
@@ -110,32 +107,25 @@
       state.jwt = sjwt;
       state.jwtExpiry = sexp;
       state.userId = suid;
-      log('JWT loaded from localStorage', { userId: state.userId });
-      // Sincroniza a GM para uso cross-domain
-      gmSet('jwt', state.jwt);
-      gmSet('jwtExpiry', state.jwtExpiry);
-      gmSet('userId', state.userId);
+      log('JWT from LS', { userId: state.userId });
+      // sync to GM si existe
+      if (hasGM) { await gmSet('jwt', state.jwt); await gmSet('jwtExpiry', state.jwtExpiry); await gmSet('userId', state.userId); }
       return true;
     }
-
-    // Limpia expirado
+    // limpia expirado
     lsDel('jwt'); lsDel('jwtExpiry'); lsDel('userId');
-    gmSet('jwt', null); gmSet('jwtExpiry', 0); gmSet('userId', null);
+    if (hasGM) { await gmSet('jwt', null); await gmSet('jwtExpiry', 0); await gmSet('userId', null); }
     return false;
   }
 
   async function bootstrapAuth() {
-    if (!isZendesk()) {
-      log('not zendesk; skip bootstrap');
-      return false;
-    }
+    if (!isZendesk()) { log('not zendesk; skip bootstrap'); return false; }
     try {
       const r = await fetch('/api/v2/users/me.json', { credentials: 'same-origin' });
       if (!r.ok) throw new Error('Zendesk me ' + r.status);
       const me = await r.json();
       const user = me.user || {};
-      // (No logueamos email por privacidad)
-      log('me:', { id: user.id, name: user.name });
+      log('me:', { id: user.id, name: user.name }); // no email en log
 
       const b = await fetch(`${CONFIG.BACKEND_URL}/auth/bootstrap`, {
         method: 'POST',
@@ -149,9 +139,9 @@
       state.jwtExpiry = now() + (data.ttl_ms || 0);
       state.userId = user.id;
 
-      // Guarda en GM (global) y LS (origen)
-      gmSet('jwt', state.jwt); gmSet('jwtExpiry', state.jwtExpiry); gmSet('userId', state.userId);
+      // guarda
       lsSet('jwt', state.jwt); lsSet('jwtExpiry', state.jwtExpiry); lsSet('userId', state.userId);
+      if (hasGM) { await gmSet('jwt', state.jwt); await gmSet('jwtExpiry', state.jwtExpiry); await gmSet('userId', state.userId); }
 
       log('bootstrap ok', { userId: state.userId, ttlMs: data.ttl_ms });
       return true;
@@ -161,16 +151,20 @@
     }
   }
 
-  // Si otra pestaña renueva el JWT, nos enteramos
-  const gmListenerId = GM_addValueChangeListener(CONFIG.STORAGE_PREFIX + 'jwt', (_k, _o, n) => {
-    if (typeof n === 'string' && n) {
-      state.jwt = n;
-      state.jwtExpiry = gmGet('jwtExpiry', 0);
-      state.userId = gmGet('userId', null);
-      log('JWT updated via GM listener');
-      if (!state.hbTimer) startHeartbeat();
-    }
-  });
+  // Listener GM (si existe) → cuando otra pestaña renueva JWT
+  let gmListenerId = null;
+  if (hasGM && typeof GM.addValueChangeListener === 'function') {
+    gmListenerId = GM.addValueChangeListener(gmKey('jwt'), async (_name, _old, val /* newValue */, remote) => {
+      if (!remote) return; // cambios locales ya los conocemos
+      if (typeof val === 'string' && val) {
+        state.jwt = val;
+        state.jwtExpiry = await gmGet('jwtExpiry', 0);
+        state.userId = await gmGet('userId', null);
+        log('JWT updated via GM listener');
+        if (!state.hbTimer) startHeartbeat();
+      }
+    });
+  }
 
   // ---------- Activity state ----------
   const currentState = () => {
@@ -183,21 +177,20 @@
   // ---------- Ping ----------
   async function sendPing(kind = 'hb') {
     if (inBlocklist()) return;
-    if (!state.jwt || state.jwtExpiry <= now()) {
-      log('no jwt / expired; skip ping');
-      return;
-    }
+    if (!state.jwt || state.jwtExpiry <= now()) { log('no jwt/expired; skip ping'); return; }
+
     const payload = {
       ts: new Date().toISOString(),
       jwt: state.jwt,
       kind,
       state: currentState(),
       domain: location.hostname,
-      path: location.pathname,           // sin query por privacidad
+      path: location.pathname, // sin query
       title: (document.title || '').slice(0, 140),
       tab_id: state.tabId,
       ref_ticket_id: currentTicketId()
     };
+
     try {
       const ok = navigator.sendBeacon(
         `${CONFIG.BACKEND_URL}/activity`,
@@ -206,7 +199,6 @@
       if (!ok) throw new Error('sendBeacon=false');
       log('ping', { kind: payload.kind, st: payload.state, tid: payload.ref_ticket_id });
     } catch (e) {
-      // fallback
       try {
         const r = await fetch(`${CONFIG.BACKEND_URL}/activity`, {
           method: 'POST',
@@ -224,21 +216,11 @@
 
   function startHeartbeat() {
     stopHeartbeat();
-    const tick = () => {
-      sendPing('hb');
-      state.hbTimer = setTimeout(tick, jitter(CONFIG.HEARTBEAT_MS));
-    };
+    const tick = () => { sendPing('hb'); state.hbTimer = setTimeout(tick, jitter(CONFIG.HEARTBEAT_MS)); };
     state.hbTimer = setTimeout(tick, jitter(CONFIG.HEARTBEAT_MS));
     log('hb start');
   }
-
-  function stopHeartbeat() {
-    if (state.hbTimer) {
-      clearTimeout(state.hbTimer);
-      state.hbTimer = null;
-      log('hb stop');
-    }
-  }
+  function stopHeartbeat() { if (state.hbTimer) { clearTimeout(state.hbTimer); state.hbTimer = null; log('hb stop'); } }
 
   // ---------- Listeners ----------
   function markActivity() { state.lastActivity = now(); }
@@ -252,7 +234,6 @@
     window.addEventListener('beforeunload', () => sendPing('pagehide'));
     window.addEventListener('pagehide', () => sendPing('pagehide'));
 
-    // SPA hooks
     const oPush = history.pushState, oReplace = history.replaceState;
     history.pushState = function (...a) { oPush.apply(this, a); setTimeout(updateTicketRef, 100); };
     history.replaceState = function (...a) { oReplace.apply(this, a); setTimeout(updateTicketRef, 100); };
@@ -271,12 +252,11 @@
     state.isZendesk = isZendesk();
     setupListeners();
 
-    const have = loadAuth();
-    if (!have && state.isZendesk) {
+    const haveJWT = await loadAuth();
+    if (!haveJWT && state.isZendesk) {
       await bootstrapAuth();
     }
 
-    // Empezar a latir si hay JWT (ahora también en dominios no Zendesk gracias a GM storage)
     if (state.jwt) {
       updateTicketRef();
       startHeartbeat();
@@ -288,12 +268,12 @@
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init, { once: true });
+    document.addEventListener('DOMContentLoaded', () => { init(); }, { once: true });
   } else {
     setTimeout(init, 50);
   }
 
-  // No exponemos JWT ni state completo en window (solo utilidades seguras)
+  // No exponemos JWT
   window.okSmartAudit = {
     ping: () => sendPing('manual'),
     stateInfo: () => ({
@@ -302,12 +282,16 @@
       tab: state.tabId,
       zendesk: state.isZendesk
     }),
-    config: { ...CONFIG, BACKEND_URL: '[redacted]' }, // no revelar URL en consola accidental
+    config: { ...CONFIG, BACKEND_URL: '[redacted]' }
   };
 
-  // Cleanup al salir del documento
+  // Limpia listener GM al salir
   window.addEventListener('unload', () => {
-    try { GM_removeValueChangeListener(gmListenerId); } catch {}
+    try {
+      if (hasGM && typeof GM.removeValueChangeListener === 'function' && gmListenerId != null) {
+        GM.removeValueChangeListener(gmListenerId);
+      }
+    } catch {}
     stopHeartbeat();
   });
 })();
