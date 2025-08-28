@@ -1,441 +1,313 @@
 // ==UserScript==
 // @name         OK Smart Audit
 // @namespace    https://okmobility.com/
-// @version      1.0.0
-// @description  Activity tracker for Zendesk agents
+// @version      1.0.1
+// @description  Activity tracker for Zendesk agents (cross-domain safe)
 // @author       OK Mobility
 // @match        *://*/*
-// @grant        none
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_addValueChangeListener
+// @grant        GM_removeValueChangeListener
 // @run-at       document-start
+// @noframes
 // ==/UserScript==
 
-(function() {
-    'use strict';
-    
-    // Configuration constants
-    const CONFIG = {
-        BACKEND_URL: 'https://oksmartaudit-ajehbzfzdyg4e9hd.westeurope-01.azurewebsites.net/api',
-        HEARTBEAT_MS: 30000,  // 30 seconds
-        JITTER_MS: 2000,      // ±2 seconds
-        IDLE_MS: 60000,       // 60 seconds
-        REF_TICKET_TTL_MS: 7 * 60 * 1000,  // 7 minutes
-        ZD_HOST_REGEX: /\.zendesk\.com$/,
-        STORAGE_PREFIX: 'ok_smart_audit_'
+(function () {
+  'use strict';
+
+  const DEBUG = false;
+
+  const CONFIG = {
+    BACKEND_URL: 'https://oksmartaudit-ajehbzfzdyg4e9hd.westeurope-01.azurewebsites.net/api',
+    HEARTBEAT_MS: 30000,
+    JITTER_MS: 2000,
+    IDLE_MS: 60000,
+    REF_TICKET_TTL_MS: 7 * 60 * 1000,
+    ZD_HOST_REGEX: /\.zendesk\.com$/,
+    STORAGE_PREFIX: 'ok_smart_audit_',
+    // (Opcional) bloquear dominios sensibles:
+    // BLOCKLIST: [/^mail\.google\.com$/, /^bank\./]
+    BLOCKLIST: []
+  };
+
+  // ---------- Utils ----------
+  const log = (...args) => { if (DEBUG) console.log('[OK Smart Audit]', ...args); };
+
+  const jitter = (ms) => Math.max(1000, ms + (Math.random() - 0.5) * 2 * CONFIG.JITTER_MS);
+  const isZendesk = () => CONFIG.ZD_HOST_REGEX.test(location.hostname);
+  const inBlocklist = () => CONFIG.BLOCKLIST.some(rx => rx.test(location.hostname));
+
+  const now = () => Date.now();
+  const genTabId = () => 'tab_' + Math.random().toString(36).slice(2, 11) + '_' + now();
+
+  // localStorage helpers (scoped por dominio)
+  const lsKey = (k) => CONFIG.STORAGE_PREFIX + k;
+  const lsSet = (k, v) => { try { localStorage.setItem(lsKey(k), JSON.stringify(v)); } catch {} };
+  const lsGet = (k, d=null) => { try { const s = localStorage.getItem(lsKey(k)); return s ? JSON.parse(s) : d; } catch { return d; } };
+  const lsDel = (k) => { try { localStorage.removeItem(lsKey(k)); } catch {} };
+
+  // GM storage (global por script, ideal para compartir JWT entre dominios)
+  const gmSet = (k, v) => GM_setValue(CONFIG.STORAGE_PREFIX + k, v);
+  const gmGet = (k, d=null) => {
+    const v = GM_getValue(CONFIG.STORAGE_PREFIX + k);
+    return (v === undefined ? d : v);
+  };
+
+  // ---------- State ----------
+  const state = {
+    jwt: null,
+    jwtExpiry: 0,
+    userId: null,
+    lastActivity: now(),
+    lastTicketId: null,
+    lastTicketExpiry: 0,
+    tabId: genTabId(),
+    isVisible: true,
+    hasFocus: true,
+    isZendesk: false,
+    hbTimer: null
+  };
+
+  // ---------- Ticket helpers ----------
+  const extractTicketId = () => {
+    const m = location.pathname.match(/\/agent\/tickets\/(\d+)/);
+    return m ? parseInt(m[1], 10) : null;
+  };
+
+  const updateTicketRef = () => {
+    const tid = extractTicketId();
+    if (tid && tid !== state.lastTicketId) {
+      state.lastTicketId = tid;
+      state.lastTicketExpiry = now() + CONFIG.REF_TICKET_TTL_MS;
+      log('ticket ref', tid);
+    }
+  };
+
+  const currentTicketId = () => (state.lastTicketId && now() < state.lastTicketExpiry) ? state.lastTicketId : null;
+
+  // ---------- Auth (JWT) ----------
+  // Carga preferentemente de GM storage (cross-domain)
+  function loadAuth() {
+    // 1) GM (global)
+    const gjwt = gmGet('jwt', null);
+    const gexp = gmGet('jwtExpiry', 0);
+    const guid = gmGet('userId', null);
+
+    if (gjwt && gexp > now()) {
+      state.jwt = gjwt;
+      state.jwtExpiry = gexp;
+      state.userId = guid;
+      log('JWT loaded from GM', { userId: state.userId });
+      return true;
+    }
+
+    // 2) Fallback: localStorage (solo mismo dominio)
+    const sjwt = lsGet('jwt', null);
+    const sexp = lsGet('jwtExpiry', 0);
+    const suid = lsGet('userId', null);
+    if (sjwt && sexp > now()) {
+      state.jwt = sjwt;
+      state.jwtExpiry = sexp;
+      state.userId = suid;
+      log('JWT loaded from localStorage', { userId: state.userId });
+      // Sincroniza a GM para uso cross-domain
+      gmSet('jwt', state.jwt);
+      gmSet('jwtExpiry', state.jwtExpiry);
+      gmSet('userId', state.userId);
+      return true;
+    }
+
+    // Limpia expirado
+    lsDel('jwt'); lsDel('jwtExpiry'); lsDel('userId');
+    gmSet('jwt', null); gmSet('jwtExpiry', 0); gmSet('userId', null);
+    return false;
+  }
+
+  async function bootstrapAuth() {
+    if (!isZendesk()) {
+      log('not zendesk; skip bootstrap');
+      return false;
+    }
+    try {
+      const r = await fetch('/api/v2/users/me.json', { credentials: 'same-origin' });
+      if (!r.ok) throw new Error('Zendesk me ' + r.status);
+      const me = await r.json();
+      const user = me.user || {};
+      // (No logueamos email por privacidad)
+      log('me:', { id: user.id, name: user.name });
+
+      const b = await fetch(`${CONFIG.BACKEND_URL}/auth/bootstrap`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.id, email: user.email, name: user.name })
+      });
+      if (!b.ok) throw new Error('bootstrap ' + b.status);
+      const data = await b.json();
+
+      state.jwt = data.jwt;
+      state.jwtExpiry = now() + (data.ttl_ms || 0);
+      state.userId = user.id;
+
+      // Guarda en GM (global) y LS (origen)
+      gmSet('jwt', state.jwt); gmSet('jwtExpiry', state.jwtExpiry); gmSet('userId', state.userId);
+      lsSet('jwt', state.jwt); lsSet('jwtExpiry', state.jwtExpiry); lsSet('userId', state.userId);
+
+      log('bootstrap ok', { userId: state.userId, ttlMs: data.ttl_ms });
+      return true;
+    } catch (e) {
+      log('bootstrap fail', e);
+      return false;
+    }
+  }
+
+  // Si otra pestaña renueva el JWT, nos enteramos
+  const gmListenerId = GM_addValueChangeListener(CONFIG.STORAGE_PREFIX + 'jwt', (_k, _o, n) => {
+    if (typeof n === 'string' && n) {
+      state.jwt = n;
+      state.jwtExpiry = gmGet('jwtExpiry', 0);
+      state.userId = gmGet('userId', null);
+      log('JWT updated via GM listener');
+      if (!state.hbTimer) startHeartbeat();
+    }
+  });
+
+  // ---------- Activity state ----------
+  const currentState = () => {
+    if (!state.isVisible || !state.hasFocus) return 'BG';
+    const idle = (now() - state.lastActivity) >= CONFIG.IDLE_MS;
+    if (state.isZendesk) return idle ? 'IDLE_ZENDESK' : 'ZTK';
+    return idle ? 'IDLE_WEB' : 'WEB_ACTIVA';
+  };
+
+  // ---------- Ping ----------
+  async function sendPing(kind = 'hb') {
+    if (inBlocklist()) return;
+    if (!state.jwt || state.jwtExpiry <= now()) {
+      log('no jwt / expired; skip ping');
+      return;
+    }
+    const payload = {
+      ts: new Date().toISOString(),
+      jwt: state.jwt,
+      kind,
+      state: currentState(),
+      domain: location.hostname,
+      path: location.pathname,           // sin query por privacidad
+      title: (document.title || '').slice(0, 140),
+      tab_id: state.tabId,
+      ref_ticket_id: currentTicketId()
     };
-    
-    // State management
-    let state = {
-        jwt: null,
-        userId: null,
-        lastActivity: Date.now(),
-        lastTicketId: null,
-        lastTicketExpiry: 0,
-        tabId: generateTabId(),
-        heartbeatInterval: null,
-        isVisible: true,
-        hasFocus: true,
-        isZendesk: false
+    try {
+      const ok = navigator.sendBeacon(
+        `${CONFIG.BACKEND_URL}/activity`,
+        new Blob([JSON.stringify(payload)], { type: 'application/json' })
+      );
+      if (!ok) throw new Error('sendBeacon=false');
+      log('ping', { kind: payload.kind, st: payload.state, tid: payload.ref_ticket_id });
+    } catch (e) {
+      // fallback
+      try {
+        const r = await fetch(`${CONFIG.BACKEND_URL}/activity`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          keepalive: true
+        });
+        if (!r.ok) throw new Error('http ' + r.status);
+        log('ping/fetch', { kind: payload.kind, st: payload.state });
+      } catch (err) {
+        log('ping fail', err);
+      }
+    }
+  }
+
+  function startHeartbeat() {
+    stopHeartbeat();
+    const tick = () => {
+      sendPing('hb');
+      state.hbTimer = setTimeout(tick, jitter(CONFIG.HEARTBEAT_MS));
     };
-    
-    // Utility functions
-    function generateTabId() {
-        return 'tab_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+    state.hbTimer = setTimeout(tick, jitter(CONFIG.HEARTBEAT_MS));
+    log('hb start');
+  }
+
+  function stopHeartbeat() {
+    if (state.hbTimer) {
+      clearTimeout(state.hbTimer);
+      state.hbTimer = null;
+      log('hb stop');
     }
-    
-    function log(message, data = null) {
-        console.log(`[OK Smart Audit] ${message}`, data || '');
+  }
+
+  // ---------- Listeners ----------
+  function markActivity() { state.lastActivity = now(); }
+  function setupListeners() {
+    ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'].forEach(ev =>
+      document.addEventListener(ev, markActivity, { passive: true })
+    );
+    document.addEventListener('visibilitychange', () => { state.isVisible = !document.hidden; });
+    window.addEventListener('focus', () => { state.hasFocus = true; });
+    window.addEventListener('blur', () => { state.hasFocus = false; });
+    window.addEventListener('beforeunload', () => sendPing('pagehide'));
+    window.addEventListener('pagehide', () => sendPing('pagehide'));
+
+    // SPA hooks
+    const oPush = history.pushState, oReplace = history.replaceState;
+    history.pushState = function (...a) { oPush.apply(this, a); setTimeout(updateTicketRef, 100); };
+    history.replaceState = function (...a) { oReplace.apply(this, a); setTimeout(updateTicketRef, 100); };
+    window.addEventListener('popstate', () => setTimeout(updateTicketRef, 100));
+
+    if (isZendesk()) {
+      const mo = new MutationObserver(() => setTimeout(updateTicketRef, 300));
+      const bodyReady = () => document.body ? (mo.observe(document.body, { childList: true, subtree: true }), true) : false;
+      if (!bodyReady()) document.addEventListener('DOMContentLoaded', bodyReady, { once: true });
+      log('SPA hooks installed');
     }
-    
-    function getStorageKey(key) {
-        return CONFIG.STORAGE_PREFIX + key;
+  }
+
+  // ---------- Init ----------
+  async function init() {
+    state.isZendesk = isZendesk();
+    setupListeners();
+
+    const have = loadAuth();
+    if (!have && state.isZendesk) {
+      await bootstrapAuth();
     }
-    
-    function saveToStorage(key, value) {
-        try {
-            localStorage.setItem(getStorageKey(key), JSON.stringify(value));
-        } catch (e) {
-            log('Storage save error:', e);
-        }
-    }
-    
-    function loadFromStorage(key, defaultValue = null) {
-        try {
-            const item = localStorage.getItem(getStorageKey(key));
-            return item ? JSON.parse(item) : defaultValue;
-        } catch (e) {
-            log('Storage load error:', e);
-            return defaultValue;
-        }
-    }
-    
-    function isZendeskDomain() {
-        return CONFIG.ZD_HOST_REGEX.test(window.location.hostname);
-    }
-    
-    function addJitter(baseMs) {
-        const jitter = (Math.random() - 0.5) * 2 * CONFIG.JITTER_MS;
-        return Math.max(1000, baseMs + jitter);
-    }
-    
-    function getCurrentState() {
-        const now = Date.now();
-        const timeSinceActivity = now - state.lastActivity;
-        const isIdle = timeSinceActivity >= CONFIG.IDLE_MS;
-        
-        if (!state.isVisible || !state.hasFocus) {
-            return 'BG';  // Background/not focused
-        }
-        
-        if (state.isZendesk) {
-            return isIdle ? 'IDLE_ZENDESK' : 'ZTK';
-        } else {
-            return isIdle ? 'IDLE_WEB' : 'WEB_ACTIVA';
-        }
-    }
-    
-    function extractTicketId() {
-        const path = window.location.pathname;
-        const match = path.match(/\/agent\/tickets\/(\d+)/);
-        return match ? parseInt(match[1], 10) : null;
-    }
-    
-    function updateTicketReference() {
-        const ticketId = extractTicketId();
-        if (ticketId && ticketId !== state.lastTicketId) {
-            state.lastTicketId = ticketId;
-            state.lastTicketExpiry = Date.now() + CONFIG.REF_TICKET_TTL_MS;
-            log(`Ticket reference updated: ${ticketId}`);
-        }
-    }
-    
-    function getCurrentTicketId() {
-        const now = Date.now();
-        if (state.lastTicketId && now < state.lastTicketExpiry) {
-            return state.lastTicketId;
-        }
-        return null;
-    }
-    
-    // Authentication functions
-    async function bootstrapAuth() {
-        if (!isZendeskDomain()) {
-            log('Not on Zendesk domain, skipping auth bootstrap');
-            return false;
-        }
-        
-        try {
-            // Get user info from Zendesk API
-            const userResponse = await fetch('/api/v2/users/me.json', {
-                credentials: 'same-origin'
-            });
-            
-            if (!userResponse.ok) {
-                throw new Error(`Zendesk API error: ${userResponse.status}`);
-            }
-            
-            const userData = await userResponse.json();
-            const user = userData.user;
-            
-            log('Zendesk user data retrieved:', {
-                id: user.id,
-                email: user.email,
-                name: user.name
-            });
-            
-            // Bootstrap JWT with backend
-            const bootstrapResponse = await fetch(`${CONFIG.BACKEND_URL}/auth/bootstrap`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    user_id: user.id,
-                    email: user.email,
-                    name: user.name
-                })
-            });
-            
-            if (!bootstrapResponse.ok) {
-                throw new Error(`Bootstrap error: ${bootstrapResponse.status}`);
-            }
-            
-            const authData = await bootstrapResponse.json();
-            
-            state.jwt = authData.jwt;
-            state.userId = user.id;
-            
-            // Save to storage
-            saveToStorage('jwt', state.jwt);
-            saveToStorage('userId', state.userId);
-            saveToStorage('jwtExpiry', Date.now() + authData.ttl_ms);
-            
-            log('Authentication successful', {
-                userId: state.userId,
-                ttlMs: authData.ttl_ms
-            });
-            
-            return true;
-            
-        } catch (error) {
-            log('Authentication failed:', error);
-            return false;
-        }
-    }
-    
-    function loadStoredAuth() {
-        const storedJwt = loadFromStorage('jwt');
-        const storedUserId = loadFromStorage('userId');
-        const jwtExpiry = loadFromStorage('jwtExpiry', 0);
-        
-        if (storedJwt && storedUserId && Date.now() < jwtExpiry) {
-            state.jwt = storedJwt;
-            state.userId = storedUserId;
-            log('Loaded stored authentication', { userId: state.userId });
-            return true;
-        }
-        
-        // Clear expired tokens
-        if (storedJwt) {
-            localStorage.removeItem(getStorageKey('jwt'));
-            localStorage.removeItem(getStorageKey('userId'));
-            localStorage.removeItem(getStorageKey('jwtExpiry'));
-        }
-        
-        return false;
-    }
-    
-    // Activity tracking
-    async function sendActivityPing(kind = 'hb') {
-        if (!state.jwt) {
-            log('No JWT available for activity ping');
-            return;
-        }
-        
-        const currentState = getCurrentState();
-        const ticketId = getCurrentTicketId();
-        
-        const payload = {
-            ts: new Date().toISOString(),
-            jwt: state.jwt,
-            kind: kind,
-            state: currentState,
-            domain: window.location.hostname,
-            path: window.location.pathname,
-            title: document.title.substring(0, 140),
-            tab_id: state.tabId,
-            ref_ticket_id: ticketId
-        };
-        
-        try {
-            // Use sendBeacon if available for better reliability
-            if (navigator.sendBeacon) {
-                const success = navigator.sendBeacon(
-                    `${CONFIG.BACKEND_URL}/activity`,
-                    JSON.stringify(payload)
-                );
-                
-                if (success) {
-                    log(`Activity ping sent (${kind}):`, {
-                        state: currentState,
-                        ticketId: ticketId
-                    });
-                } else {
-                    throw new Error('sendBeacon failed');
-                }
-            } else {
-                // Fallback to fetch
-                const response = await fetch(`${CONFIG.BACKEND_URL}/activity`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(payload),
-                    keepalive: true
-                });
-                
-                if (response.ok) {
-                    log(`Activity ping sent (${kind}):`, {
-                        state: currentState,
-                        ticketId: ticketId
-                    });
-                } else {
-                    throw new Error(`HTTP ${response.status}`);
-                }
-            }
-        } catch (error) {
-            log('Activity ping failed:', error);
-        }
-    }
-    
-    function startHeartbeat() {
-        if (state.heartbeatInterval) {
-            clearInterval(state.heartbeatInterval);
-        }
-        
-        const sendPing = () => {
-            sendActivityPing('hb');
-            
-            // Schedule next ping with jitter
-            const nextInterval = addJitter(CONFIG.HEARTBEAT_MS);
-            state.heartbeatInterval = setTimeout(sendPing, nextInterval);
-        };
-        
-        // Start first ping after jittered delay
-        const initialDelay = addJitter(CONFIG.HEARTBEAT_MS);
-        state.heartbeatInterval = setTimeout(sendPing, initialDelay);
-        
-        log('Heartbeat started');
-    }
-    
-    function stopHeartbeat() {
-        if (state.heartbeatInterval) {
-            clearTimeout(state.heartbeatInterval);
-            state.heartbeatInterval = null;
-            log('Heartbeat stopped');
-        }
-    }
-    
-    // Activity detection
-    function trackActivity() {
-        state.lastActivity = Date.now();
-    }
-    
-    function setupActivityListeners() {
-        // Mouse and keyboard activity
-        const activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
-        activityEvents.forEach(event => {
-            document.addEventListener(event, trackActivity, { passive: true });
-        });
-        
-        // Page visibility
-        document.addEventListener('visibilitychange', () => {
-            state.isVisible = !document.hidden;
-            log('Visibility changed:', state.isVisible);
-        });
-        
-        // Window focus
-        window.addEventListener('focus', () => {
-            state.hasFocus = true;
-            log('Window focused');
-        });
-        
-        window.addEventListener('blur', () => {
-            state.hasFocus = false;
-            log('Window blurred');
-        });
-        
-        // Page unload
-        window.addEventListener('beforeunload', () => {
-            sendActivityPing('pagehide');
-        });
-        
-        window.addEventListener('pagehide', () => {
-            sendActivityPing('pagehide');
-        });
-    }
-    
-    // SPA navigation detection
-    function setupSPAHooks() {
-        // History API hooks
-        const originalPushState = history.pushState;
-        const originalReplaceState = history.replaceState;
-        
-        history.pushState = function(...args) {
-            originalPushState.apply(this, args);
-            setTimeout(updateTicketReference, 100);
-        };
-        
-        history.replaceState = function(...args) {
-            originalReplaceState.apply(this, args);
-            setTimeout(updateTicketReference, 100);
-        };
-        
-        window.addEventListener('popstate', () => {
-            setTimeout(updateTicketReference, 100);
-        });
-        
-        // MutationObserver for DOM changes
-        if (isZendeskDomain()) {
-            const observer = new MutationObserver((mutations) => {
-                let urlChanged = false;
-                
-                mutations.forEach((mutation) => {
-                    if (mutation.type === 'childList') {
-                        // Check if URL-related elements changed
-                        const hasUrlChange = Array.from(mutation.addedNodes).some(node => 
-                            node.nodeType === Node.ELEMENT_NODE && 
-                            (node.querySelector && node.querySelector('[data-test-id="ticket-pane"]'))
-                        );
-                        
-                        if (hasUrlChange) {
-                            urlChanged = true;
-                        }
-                    }
-                });
-                
-                if (urlChanged) {
-                    setTimeout(updateTicketReference, 500);
-                }
-            });
-            
-            observer.observe(document.body, {
-                childList: true,
-                subtree: true
-            });
-            
-            log('SPA hooks installed');
-        }
-    }
-    
-    // Initialization
-    async function initialize() {
-        log('Initializing OK Smart Audit...');
-        
-        // Set domain flag
-        state.isZendesk = isZendeskDomain();
-        
-        // Setup activity tracking
-        setupActivityListeners();
-        setupSPAHooks();
-        
-        // Try to load stored authentication
-        if (!loadStoredAuth()) {
-            // Bootstrap authentication if on Zendesk
-            if (state.isZendesk) {
-                await bootstrapAuth();
-            }
-        }
-        
-        // Start heartbeat if authenticated
-        if (state.jwt) {
-            updateTicketReference();
-            startHeartbeat();
-        } else {
-            log('No authentication available, heartbeat not started');
-        }
-        
-        log('OK Smart Audit initialized', {
-            isZendesk: state.isZendesk,
-            authenticated: !!state.jwt,
-            tabId: state.tabId
-        });
-    }
-    
-    // Wait for DOM to be ready
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initialize);
+
+    // Empezar a latir si hay JWT (ahora también en dominios no Zendesk gracias a GM storage)
+    if (state.jwt) {
+      updateTicketRef();
+      startHeartbeat();
     } else {
-        // DOM already loaded
-        setTimeout(initialize, 100);
+      log('no auth; no hb');
     }
-    
-    // Expose some functions for debugging
-    window.okSmartAudit = {
-        getState: () => ({ ...state }),
-        getCurrentState,
-        sendPing: () => sendActivityPing('manual'),
-        bootstrap: bootstrapAuth,
-        config: CONFIG
-    };
-    
+
+    log('init', { zendesk: state.isZendesk, authed: !!state.jwt, tab: state.tabId, host: location.hostname });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init, { once: true });
+  } else {
+    setTimeout(init, 50);
+  }
+
+  // No exponemos JWT ni state completo en window (solo utilidades seguras)
+  window.okSmartAudit = {
+    ping: () => sendPing('manual'),
+    stateInfo: () => ({
+      authed: !!state.jwt,
+      expInSec: Math.max(0, Math.floor((state.jwtExpiry - now()) / 1000)),
+      tab: state.tabId,
+      zendesk: state.isZendesk
+    }),
+    config: { ...CONFIG, BACKEND_URL: '[redacted]' }, // no revelar URL en consola accidental
+  };
+
+  // Cleanup al salir del documento
+  window.addEventListener('unload', () => {
+    try { GM_removeValueChangeListener(gmListenerId); } catch {}
+    stopHeartbeat();
+  });
 })();
