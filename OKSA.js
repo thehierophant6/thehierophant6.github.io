@@ -59,11 +59,14 @@
   function extractTicketId() { const m = location.pathname.match(/\/agent\/tickets\/(\d+)/); return m ? parseInt(m[1], 10) : null; }
   function updateTicketRef() {
     const tid = extractTicketId();
-    if (tid && tid !== state.lastTicketId) {
-      state.lastTicketId = tid;
+    if (tid) {
+      if (tid !== state.lastTicketId) {
+        state.lastTicketId = tid;
+        log('ticket ref', tid);
+        emitStateIfChanged(true); // corta segmento ZTK a ticket correcto ASAP
+      }
+      // Renovar TTL siempre que estemos en un ticket (mantener referencia activa)
       state.lastTicketExpiry = Date.now() + CONFIG.REF_TICKET_TTL_MS;
-      log('ticket ref', tid);
-      emitStateIfChanged(true); // corta segmento ZTK a ticket correcto ASAP
     }
   }
   function currentTicketId() { return (state.lastTicketId && Date.now() < state.lastTicketExpiry) ? state.lastTicketId : null; }
