@@ -138,7 +138,17 @@
 
   // Envío de pings
   async function sendPing(kind = 'hb', force = false) {
-    if (!state.jwt || Date.now() >= state.jwtExpiry) return;
+    // Check if JWT is expired and try to renew
+    if (!state.jwt || Date.now() >= state.jwtExpiry) {
+      log('JWT expired, attempting renewal');
+      if (state.isZendesk) {
+        await bootstrapAuth();
+      }
+      if (!state.jwt) {
+        log('No valid JWT, skipping ping');
+        return;
+      }
+    }
     const cur = getCurrentState();
 
     // Anti-flood para pings de cambio de estado
@@ -172,8 +182,29 @@
         keepalive: true,
         credentials: 'omit'  // Explicitly omit credentials
       });
-      if (!r.ok) throw new Error('http ' + r.status);
-      log('ping', { kind: payload.kind, st: payload.state, tid: payload.ref_ticket_id });
+      
+      if (r.status === 401) {
+        log('401 Unauthorized - JWT expired, renewing');
+        if (state.isZendesk && await bootstrapAuth()) {
+          // Retry with new JWT
+          payload.jwt = state.jwt;
+          const retry = await fetch(`${CONFIG.BACKEND_URL}/activity`, {
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload), 
+            keepalive: true,
+            credentials: 'omit'
+          });
+          if (!retry.ok) throw new Error('retry http ' + retry.status);
+          log('ping retry success', { kind: payload.kind, st: payload.state, tid: payload.ref_ticket_id });
+        } else {
+          throw new Error('JWT renewal failed');
+        }
+      } else if (!r.ok) {
+        throw new Error('http ' + r.status);
+      } else {
+        log('ping', { kind: payload.kind, st: payload.state, tid: payload.ref_ticket_id });
+      }
     } catch (err) {
       log('ping fail', err);
     }
