@@ -264,20 +264,32 @@
     setupActivityListeners();
     setupSPAHooks();
 
-    // Only try bootstrap on Zendesk and after page is fully loaded
-    if (state.isZendesk && document.readyState === 'complete') {
+    // Only try bootstrap on Zendesk
+    if (state.isZendesk) {
       const have = loadAuth();
       if (!have) { 
-        // Add delay to ensure Zendesk is fully loaded
-        setTimeout(async () => {
-          await bootstrapAuth();
-          if (state.jwt) {
+        // Try bootstrap with multiple delays to handle different loading states
+        const tryBootstrap = async () => {
+          log('attempting bootstrap...');
+          const success = await bootstrapAuth();
+          if (success && state.jwt) {
+            log('bootstrap successful, starting tracking');
             updateTicketRef();
             startHeartbeat();
             resetIdleTimer();
             emitStateIfChanged(true);
+          } else {
+            log('bootstrap failed, will retry');
           }
-        }, 2000);
+        };
+        
+        // Try immediately
+        setTimeout(tryBootstrap, 500);
+        // Try again after 3 seconds
+        setTimeout(tryBootstrap, 3000);
+        // Try again after 10 seconds (final attempt)
+        setTimeout(tryBootstrap, 10000);
+        
       } else if (state.jwt) {
         updateTicketRef();
         startHeartbeat();
@@ -306,6 +318,7 @@
   // Solo expone info no sensible
   window.okSmartAudit = {
     ping: () => sendPing('manual', true),
+    bootstrap: bootstrapAuth,  // Exponer bootstrap para debug
     stateInfo: () => ({
       authed: !!state.jwt,
       tab: state.tabId,
