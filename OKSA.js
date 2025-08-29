@@ -13,7 +13,7 @@
 (function () {
   'use strict';
 
-  const DEBUG = false;
+  const DEBUG = true;  // Temporary debug
   const log = (...a) => { if (DEBUG) console.log('[OK Smart Audit]', ...a); };
 
   // Config
@@ -115,7 +115,8 @@
       const b = await fetch(`${CONFIG.BACKEND_URL}/auth/bootstrap`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id, email: user.email, name: user.name })
+        body: JSON.stringify({ user_id: user.id, email: user.email, name: user.name }),
+        credentials: 'omit'  // Explicitly omit credentials
       });
       if (!b.ok) {
         log('backend bootstrap failed', b.status);
@@ -163,23 +164,18 @@
     };
 
     try {
-      const ok = navigator.sendBeacon(
-        `${CONFIG.BACKEND_URL}/activity`,
-        new Blob([JSON.stringify(payload)], { type: 'application/json' })
-      );
-      if (!ok) throw new Error('sendBeacon=false');
+      // Use fetch instead of sendBeacon to avoid CORS credential issues
+      const r = await fetch(`${CONFIG.BACKEND_URL}/activity`, {
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload), 
+        keepalive: true,
+        credentials: 'omit'  // Explicitly omit credentials
+      });
+      if (!r.ok) throw new Error('http ' + r.status);
       log('ping', { kind: payload.kind, st: payload.state, tid: payload.ref_ticket_id });
-    } catch {
-      try {
-        const r = await fetch(`${CONFIG.BACKEND_URL}/activity`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload), keepalive: true
-        });
-        if (!r.ok) throw new Error('http ' + r.status);
-        log('ping/fetch', { kind: payload.kind, st: payload.state });
-      } catch (err) {
-        log('ping fail', err);
-      }
+    } catch (err) {
+      log('ping fail', err);
     }
   }
 
