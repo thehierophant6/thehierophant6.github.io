@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         OK Smart Audit
 // @namespace    https://okmobility.com/
-// @version      1.1.0
-// @description  Activity tracker for Zendesk agents (refresh token auth + cross-site fix)
+// @version      1.2.0
+// @description  Activity tracker for Zendesk agents (multi-session + cross-tab sync)
 // @author       OK Mobility
 // @match        *://*/*
 // @grant        none
@@ -170,6 +170,11 @@
   async function refreshJWT() {
     if (!state.refreshToken || Date.now() >= state.refreshExpiry) {
       log('refresh token expired or missing');
+      // If we're on Zendesk and refresh token is gone, try bootstrap directly
+      if (state.isZendesk) {
+        log('attempting bootstrap fallback from refreshJWT');
+        return await bootstrapAuth();
+      }
       return false;
     }
     
@@ -188,6 +193,11 @@
         lsDel('refreshToken'); lsDel('refreshExpiry');
         state.refreshToken = null;
         state.refreshExpiry = 0;
+        // Try bootstrap fallback if on Zendesk
+        if (state.isZendesk) {
+          log('attempting bootstrap fallback after refresh failure');
+          return await bootstrapAuth();
+        }
         return false;
       }
       
@@ -202,6 +212,11 @@
       return true;
     } catch (e) {
       log('refresh error', e);
+      // Try bootstrap fallback if on Zendesk
+      if (state.isZendesk) {
+        log('attempting bootstrap fallback after refresh exception');
+        return await bootstrapAuth();
+      }
       return false;
     }
   }
@@ -326,6 +341,27 @@
     }, wait + 10); // pequeño margen
   }
 
+  // Cross-tab synchronization
+  function syncTokensFromStorage() {
+    const jwt = lsGet('jwt', null);
+    const jwtExp = lsGet('jwtExpiry', 0);
+    const refreshToken = lsGet('refreshToken', null);
+    const refreshExp = lsGet('refreshExpiry', 0);
+    
+    // Update state if we found newer tokens
+    if (jwt && jwtExp > state.jwtExpiry) {
+      state.jwt = jwt;
+      state.jwtExpiry = jwtExp;
+      log('synced newer JWT from another tab');
+    }
+    
+    if (refreshToken && refreshExp > state.refreshExpiry) {
+      state.refreshToken = refreshToken;
+      state.refreshExpiry = refreshExp;
+      log('synced newer refresh token from another tab');
+    }
+  }
+
   // Listeners
   function trackActivity() {
     state.lastActivity = Date.now();
@@ -349,6 +385,14 @@
 
     window.addEventListener('beforeunload', () => { sendPing('pagehide', true); });
     window.addEventListener('pagehide',      () => { sendPing('pagehide', true); });
+    
+    // Cross-tab token synchronization
+    window.addEventListener('storage', (e) => {
+      if (e.key && e.key.startsWith(CONFIG.STORAGE_PREFIX)) {
+        log('localStorage changed in another tab, syncing tokens');
+        syncTokensFromStorage();
+      }
+    });
   }
 
   // SPA hooks (Zendesk)
