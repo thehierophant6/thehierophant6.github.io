@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OK Smart Audit
 // @namespace    https://okmobility.com/
-// @version      1.2.0
+// @version      1.2.1
 // @description  Activity tracker for Zendesk agents (multi-session + cross-tab sync)
 // @author       OK Mobility
 // @match        *://*/*
@@ -13,7 +13,7 @@
 (function () {
   'use strict';
 
-  const DEBUG = true;  // Temporary debug
+  const DEBUG = false;  // Production mode
   const log = (...a) => { if (DEBUG) console.log('[OK Smart Audit]', ...a); };
 
   // Config
@@ -410,6 +410,13 @@
     }
   }
 
+  // Clean legacy localStorage keys
+  function cleanLegacyStorage() {
+    ['jwt','jwtExpiry','userId','refreshToken','refreshExpiry'].forEach(k => {
+      try { localStorage.removeItem(k); } catch {}
+    });
+  }
+
   // Init
   async function initialize() {
     log('init…');
@@ -420,6 +427,9 @@
       log('skipping API endpoint');
       return;
     }
+    
+    // Clean legacy storage once
+    cleanLegacyStorage();
     
     setupActivityListeners();
     setupSPAHooks();
