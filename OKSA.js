@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         OK Smart Audit
 // @namespace    https://okmobility.com/
-// @version      1.0.3
-// @description  Activity tracker for Zendesk agents (focus/idle robusto + state-change pings)
+// @version      1.1.0
+// @description  Activity tracker for Zendesk agents (refresh token auth + cross-site fix)
 // @author       OK Mobility
 // @match        *://*/*
 // @grant        none
@@ -33,6 +33,8 @@
     jwt: null,
     userId: null,
     jwtExpiry: 0,
+    refreshToken: null,
+    refreshExpiry: 0,
     lastActivity: Date.now(),
     lastTicketId: null,
     lastTicketExpiry: 0,
@@ -84,12 +86,30 @@
     const jwt = lsGet('jwt', null);
     const exp = lsGet('jwtExpiry', 0);
     const uid = lsGet('userId', null);
+    const refreshToken = lsGet('refreshToken', null);
+    const refreshExp = lsGet('refreshExpiry', 0);
+    
     if (jwt && exp && Date.now() < exp) {
-      state.jwt = jwt; state.jwtExpiry = exp; state.userId = uid;
+      state.jwt = jwt; 
+      state.jwtExpiry = exp; 
+      state.userId = uid;
+      state.refreshToken = refreshToken;
+      state.refreshExpiry = refreshExp;
       log('auth loaded', { userId: uid });
       return true;
     }
-    lsDel('jwt'); lsDel('jwtExpiry'); lsDel('userId');
+    
+    // JWT expired but refresh token might still be valid
+    if (refreshToken && refreshExp && Date.now() < refreshExp) {
+      state.refreshToken = refreshToken;
+      state.refreshExpiry = refreshExp;
+      state.userId = uid;
+      log('JWT expired but refresh token available');
+      return 'refresh_needed';
+    }
+    
+    // Clear all auth data
+    lsDel('jwt'); lsDel('jwtExpiry'); lsDel('userId'); lsDel('refreshToken'); lsDel('refreshExpiry');
     return false;
   }
 
@@ -129,12 +149,59 @@
       const data = await b.json();
       state.jwt = data.jwt;
       state.jwtExpiry = Date.now() + (data.ttl_ms || 0);
+      state.refreshToken = data.refresh_token;
+      state.refreshExpiry = Date.now() + (data.refresh_ttl_ms || 0);
       state.userId = user.id;
-      lsSet('jwt', state.jwt); lsSet('jwtExpiry', state.jwtExpiry); lsSet('userId', state.userId);
+      
+      lsSet('jwt', state.jwt); 
+      lsSet('jwtExpiry', state.jwtExpiry); 
+      lsSet('refreshToken', state.refreshToken);
+      lsSet('refreshExpiry', state.refreshExpiry);
+      lsSet('userId', state.userId);
+      
       log('bootstrap ok', { uid: user.id });
       return true;
     } catch (e) {
       log('bootstrap fail', e);
+      return false;
+    }
+  }
+
+  async function refreshJWT() {
+    if (!state.refreshToken || Date.now() >= state.refreshExpiry) {
+      log('refresh token expired or missing');
+      return false;
+    }
+    
+    try {
+      log('refreshing JWT with refresh token');
+      const r = await fetch(`${CONFIG.BACKEND_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: state.refreshToken }),
+        credentials: 'omit'
+      });
+      
+      if (!r.ok) {
+        log('refresh failed', r.status);
+        // Clear invalid refresh token
+        lsDel('refreshToken'); lsDel('refreshExpiry');
+        state.refreshToken = null;
+        state.refreshExpiry = 0;
+        return false;
+      }
+      
+      const data = await r.json();
+      state.jwt = data.jwt;
+      state.jwtExpiry = Date.now() + (data.ttl_ms || 0);
+      
+      lsSet('jwt', state.jwt);
+      lsSet('jwtExpiry', state.jwtExpiry);
+      
+      log('JWT refreshed successfully');
+      return true;
+    } catch (e) {
+      log('refresh error', e);
       return false;
     }
   }
@@ -144,12 +211,21 @@
     // Check if JWT is expired and try to renew
     if (!state.jwt || Date.now() >= state.jwtExpiry) {
       log('JWT expired, attempting renewal');
-      if (state.isZendesk) {
-        await bootstrapAuth();
-      }
-      if (!state.jwt) {
-        log('No valid JWT, skipping ping');
-        return;
+      
+      // Try refresh token first
+      const refreshed = await refreshJWT();
+      if (!refreshed) {
+        // Refresh failed, try bootstrap if we're on Zendesk
+        if (state.isZendesk) {
+          const bootstrapped = await bootstrapAuth();
+          if (!bootstrapped) {
+            log('No valid JWT, skipping ping');
+            return;
+          }
+        } else {
+          log('No valid JWT, skipping ping');
+          return;
+        }
       }
     }
     const cur = getCurrentState();
@@ -187,8 +263,18 @@
       });
       
       if (r.status === 401) {
-        log('401 Unauthorized - JWT expired, renewing');
-        if (state.isZendesk && await bootstrapAuth()) {
+        log('401 Unauthorized - JWT expired, attempting refresh');
+        let renewed = false;
+        
+        // Try refresh token first
+        if (await refreshJWT()) {
+          renewed = true;
+        } else if (state.isZendesk && await bootstrapAuth()) {
+          // Fallback to bootstrap if refresh failed
+          renewed = true;
+        }
+        
+        if (renewed) {
           // Retry with new JWT
           payload.jwt = state.jwt;
           const retry = await fetch(`${CONFIG.BACKEND_URL}/activity`, {
@@ -296,9 +382,47 @@
 
     // Only try bootstrap on Zendesk
     if (state.isZendesk) {
-      const have = loadAuth();
-      if (!have) { 
-        // Try bootstrap with multiple delays to handle different loading states
+      const authStatus = loadAuth();
+      if (authStatus === true) {
+        // Valid JWT, start tracking
+        updateTicketRef();
+        startHeartbeat();
+        resetIdleTimer();
+        emitStateIfChanged(true);
+      } else if (authStatus === 'refresh_needed') {
+        // Try to refresh JWT first
+        const tryBootstrap = async () => {
+          log('attempting bootstrap...');
+          const success = await bootstrapAuth();
+          if (success && state.jwt) {
+            log('bootstrap successful, starting tracking');
+            updateTicketRef();
+            startHeartbeat();
+            resetIdleTimer();
+            emitStateIfChanged(true);
+          } else {
+            log('bootstrap failed, will retry');
+          }
+        };
+        
+        const tryRefresh = async () => {
+          log('attempting JWT refresh...');
+          const refreshed = await refreshJWT();
+          if (refreshed && state.jwt) {
+            log('refresh successful, starting tracking');
+            updateTicketRef();
+            startHeartbeat();
+            resetIdleTimer();
+            emitStateIfChanged(true);
+          } else {
+            log('refresh failed, trying bootstrap');
+            // Fallback to bootstrap
+            setTimeout(tryBootstrap, 500);
+          }
+        };
+        setTimeout(tryRefresh, 500);
+      } else {
+        // No valid auth, try bootstrap
         const tryBootstrap = async () => {
           log('attempting bootstrap...');
           const success = await bootstrapAuth();
@@ -319,20 +443,25 @@
         setTimeout(tryBootstrap, 3000);
         // Try again after 10 seconds (final attempt)
         setTimeout(tryBootstrap, 10000);
-        
-      } else if (state.jwt) {
-        updateTicketRef();
-        startHeartbeat();
-        resetIdleTimer();
-        emitStateIfChanged(true);
       }
     } else if (!state.isZendesk) {
       // Non-Zendesk sites - just track activity if we have auth
-      const have = loadAuth();
-      if (have && state.jwt) {
+      const authStatus = loadAuth();
+      if (authStatus === true && state.jwt) {
         startHeartbeat();
         resetIdleTimer();
         emitStateIfChanged(true);
+      } else if (authStatus === 'refresh_needed') {
+        // Try to refresh for non-Zendesk sites too
+        const tryRefresh = async () => {
+          const refreshed = await refreshJWT();
+          if (refreshed && state.jwt) {
+            startHeartbeat();
+            resetIdleTimer();
+            emitStateIfChanged(true);
+          }
+        };
+        setTimeout(tryRefresh, 500);
       }
     }
 
