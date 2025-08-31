@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         OK Smart Audit
 // @namespace    https://okmobility.com/
-// @version      1.2.1
-// @description  Activity tracker for Zendesk agents (multi-session + cross-tab sync)
+// @version      1.3.0
+// @description  Multi-domain activity tracker with enhanced Zendesk support
 // @author       OK Mobility
 // @match        *://*/*
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @connect      oksmartaudit-ajehbzfzdyg4e9hd.westeurope-01.azurewebsites.net
 // @run-at       document-start
 // @noframes
 // ==/UserScript==
@@ -21,11 +22,29 @@
     BACKEND_URL: 'https://oksmartaudit-ajehbzfzdyg4e9hd.westeurope-01.azurewebsites.net/api',
     HEARTBEAT_MS: 30000,         // latido base
     JITTER_MS: 2000,             // ±2s
-    IDLE_MS: 60000,              // 60s → idle
+    IDLE_MS: 60000,              // 60s → idle normal
+    IDLE_ZENDESK_MS: 90000,      // 90s → idle en Zendesk (lectura)
     REF_TICKET_TTL_MS: 7 * 60 * 1000,
     ZD_HOST_REGEX: /\.zendesk\.com$/,
     STORAGE_PREFIX: 'ok_smart_audit_',
-    STATE_MIN_INTERVAL_MS: 1500  // anti-flood entre pings de cambio de estado
+    STATE_MIN_INTERVAL_MS: 1500,  // anti-flood entre pings de cambio de estado
+    DOMAINS_TO_TRACK: [
+      'zendesk.com',
+      'youtube.com',
+      'facebook.com', 
+      'instagram.com',
+      'twitter.com',
+      'x.com',
+      'tiktok.com',
+      'whatsapp.com',
+      'gmail.com',
+      'outlook.com',
+      'netflix.com',
+      'amazon.com',
+      'mercadolibre.com',
+      'google.com',
+      'bing.com'
+    ]
   };
 
   // Estado
@@ -57,6 +76,35 @@
   function lsGet(k, d=null) { try { const s = localStorage.getItem(lsKey(k)); return s ? JSON.parse(s) : d; } catch { return d; } }
   function lsDel(k) { try { localStorage.removeItem(lsKey(k)); } catch {} }
 
+  function isTrackedDomain() {
+    const hostname = location.hostname.toLowerCase();
+    return CONFIG.DOMAINS_TO_TRACK.some(domain => 
+      hostname.includes(domain.toLowerCase())
+    );
+  }
+
+  function getDomainCategory() {
+    const hostname = location.hostname.toLowerCase();
+    
+    if (hostname.includes('zendesk.com')) return 'WORK';
+    if (hostname.includes('youtube.com') || 
+        hostname.includes('netflix.com') || 
+        hostname.includes('tiktok.com')) return 'ENTERTAINMENT';
+    if (hostname.includes('facebook.com') || 
+        hostname.includes('instagram.com') || 
+        hostname.includes('twitter.com') || 
+        hostname.includes('x.com') || 
+        hostname.includes('whatsapp.com')) return 'SOCIAL';
+    if (hostname.includes('gmail.com') || 
+        hostname.includes('outlook.com')) return 'EMAIL';
+    if (hostname.includes('amazon.com') || 
+        hostname.includes('mercadolibre.com')) return 'SHOPPING';
+    if (hostname.includes('google.com') || 
+        hostname.includes('bing.com')) return 'SEARCH';
+    
+    return 'OTHER';
+  }
+
   // Ticket helpers
   function extractTicketId() { const m = location.pathname.match(/\/agent\/tickets\/(\d+)/); return m ? parseInt(m[1], 10) : null; }
   function updateTicketRef() {
@@ -75,7 +123,11 @@
 
   // Estado lógico actual
   function getCurrentState() {
-    const idle = (Date.now() - state.lastActivity) >= CONFIG.IDLE_MS;
+    // Usar umbral diferente para Zendesk con ticket (lectura permitida)
+    const idleThreshold = (state.isZendesk && state.lastTicketId) ? 
+      CONFIG.IDLE_ZENDESK_MS : CONFIG.IDLE_MS;
+    
+    const idle = (Date.now() - state.lastActivity) >= idleThreshold;
     if (!state.isVisible || !state.hasFocus) return 'BG';                    // pestaña oculta o sin foco
     if (state.isZendesk) return idle ? 'IDLE_ZENDESK' : 'ZTK';               // foco + Zendesk
     return idle ? 'IDLE_WEB' : 'WEB_ACTIVA';                                 // foco + otra web
@@ -264,7 +316,9 @@
       path: location.pathname,
       title: (document.title || '').slice(0, 140),
       tab_id: state.tabId,
-      ref_ticket_id: currentTicketId()
+      ref_ticket_id: currentTicketId(),
+      domain_category: getDomainCategory(),
+      is_tracked_domain: isTrackedDomain()
     };
 
     try {
@@ -330,10 +384,15 @@
     }
   }
 
-  // Idle watcher: dispara 'state' al entrar en idle
+  // Idle watcher: dispara 'state' al entrar en idle (con umbral dinámico)
   function resetIdleTimer() {
     if (state.idleTimer) clearTimeout(state.idleTimer);
-    const due = state.lastActivity + CONFIG.IDLE_MS - Date.now();
+    
+    // Usar umbral diferente para Zendesk con ticket
+    const idleThreshold = (state.isZendesk && state.lastTicketId) ? 
+      CONFIG.IDLE_ZENDESK_MS : CONFIG.IDLE_MS;
+    
+    const due = state.lastActivity + idleThreshold - Date.now();
     const wait = Math.max(0, due);
     state.idleTimer = setTimeout(() => {
       // Entra a estado IDLE_* (o BG si perdió foco entretanto)
@@ -427,6 +486,15 @@
       log('skipping API endpoint');
       return;
     }
+
+    // Solo trackear en dominios relevantes o si ya tenemos auth
+    const shouldTrack = isTrackedDomain() || lsGet('jwt', null);
+    if (!shouldTrack) {
+      log('domain not tracked and no existing auth, skipping');
+      return;
+    }
+    
+    log('domain:', location.hostname, 'category:', getDomainCategory(), 'tracked:', isTrackedDomain());
     
     // Clean legacy storage once
     cleanLegacyStorage();
