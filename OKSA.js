@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  const DEBUG = false;  // Production mode
+  const DEBUG = true;  // Enable debug for tracking issues
   const log = (...a) => { if (DEBUG) console.log('[OK Smart Audit]', ...a); };
 
   // Config
@@ -274,7 +274,7 @@
   }
 
   // Envío de pings
-  async function sendPing(kind = 'hb', force = false) {
+  async function sendPing(kind = 'hb', force = false, allowWithoutAuth = false) {
     // Check if JWT is expired and try to renew
     if (!state.jwt || Date.now() >= state.jwtExpiry) {
       log('JWT expired, attempting renewal');
@@ -286,12 +286,18 @@
         if (state.isZendesk) {
           const bootstrapped = await bootstrapAuth();
           if (!bootstrapped) {
+            if (!allowWithoutAuth) {
+              log('No valid JWT, skipping ping');
+              return;
+            }
+            log('No valid JWT but allowWithoutAuth=true, sending ping anyway');
+          }
+        } else {
+          if (!allowWithoutAuth) {
             log('No valid JWT, skipping ping');
             return;
           }
-        } else {
-          log('No valid JWT, skipping ping');
-          return;
+          log('No valid JWT but allowWithoutAuth=true, sending ping anyway');
         }
       }
     }
@@ -309,7 +315,7 @@
 
     const payload = {
       ts: new Date().toISOString(),
-      jwt: state.jwt,
+      jwt: state.jwt || 'no-auth', // Permite funcionar sin JWT
       kind,                        // 'hb' | 'state' | 'pagehide' | 'manual'
       state: cur,                  // ZTK | IDLE_ZENDESK | WEB_ACTIVA | IDLE_WEB | BG
       domain: location.hostname,
@@ -377,10 +383,10 @@
   function stopHeartbeat() { if (state.hbTimer) { clearTimeout(state.hbTimer); state.hbTimer = null; log('hb stop'); } }
 
   // Emisión inmediata si el estado cambia (focus/visibility/idle)
-  function emitStateIfChanged(force=false) {
+  function emitStateIfChanged(force=false, allowWithoutAuth=false) {
     const cur = getCurrentState();
     if (state.lastSentState !== cur || force) {
-      void sendPing('state', force);
+      void sendPing('state', force, allowWithoutAuth);
     }
   }
 
@@ -396,7 +402,7 @@
     const wait = Math.max(0, due);
     state.idleTimer = setTimeout(() => {
       // Entra a estado IDLE_* (o BG si perdió foco entretanto)
-      emitStateIfChanged(true);
+      emitStateIfChanged(true, !state.isZendesk);
     }, wait + 10); // pequeño margen
   }
 
@@ -426,7 +432,8 @@
     state.lastActivity = Date.now();
     resetIdleTimer();
     // Si veníamos de idle, esto cambia a ZTK/WEB_ACTIVA → emitir borde:
-    emitStateIfChanged();
+    // Permitir tracking sin auth si no estamos en Zendesk
+    emitStateIfChanged(false, !state.isZendesk);
   }
 
   function setupActivityListeners() {
@@ -436,11 +443,11 @@
 
     document.addEventListener('visibilitychange', () => {
       state.isVisible = !document.hidden;
-      emitStateIfChanged(true); // borde exacto al cambiar visibilidad
+      emitStateIfChanged(true, !state.isZendesk); // borde exacto al cambiar visibilidad
     });
 
-    window.addEventListener('focus', () => { state.hasFocus = true; emitStateIfChanged(true); });
-    window.addEventListener('blur',  () => { state.hasFocus = false; emitStateIfChanged(true); });
+    window.addEventListener('focus', () => { state.hasFocus = true; emitStateIfChanged(true, !state.isZendesk); });
+    window.addEventListener('blur',  () => { state.hasFocus = false; emitStateIfChanged(true, !state.isZendesk); });
 
     window.addEventListener('beforeunload', () => { sendPing('pagehide', true); });
     window.addEventListener('pagehide',      () => { sendPing('pagehide', true); });
@@ -487,10 +494,10 @@
       return;
     }
 
-    // Solo trackear en dominios relevantes o si ya tenemos auth
-    const shouldTrack = isTrackedDomain() || lsGet('jwt', null);
+    // Trackear en dominios relevantes SIEMPRE, y intentar usar auth existente si hay
+    const shouldTrack = isTrackedDomain();
     if (!shouldTrack) {
-      log('domain not tracked and no existing auth, skipping');
+      log('domain not in tracking list, skipping');
       return;
     }
     
@@ -567,23 +574,54 @@
         setTimeout(tryBootstrap, 10000);
       }
     } else if (!state.isZendesk) {
-      // Non-Zendesk sites - just track activity if we have auth
+      // Non-Zendesk sites - track activity if we have auth OR try to get auth
       const authStatus = loadAuth();
+      
       if (authStatus === true && state.jwt) {
+        log('Non-Zendesk site with valid JWT, starting tracking');
         startHeartbeat();
         resetIdleTimer();
         emitStateIfChanged(true);
       } else if (authStatus === 'refresh_needed') {
+        log('Non-Zendesk site with refresh token available');
         // Try to refresh for non-Zendesk sites too
         const tryRefresh = async () => {
           const refreshed = await refreshJWT();
           if (refreshed && state.jwt) {
+            log('JWT refreshed successfully on non-Zendesk site');
             startHeartbeat();
             resetIdleTimer();
             emitStateIfChanged(true);
+          } else {
+            log('Failed to refresh JWT on non-Zendesk site');
           }
         };
         setTimeout(tryRefresh, 500);
+      } else {
+        log('No auth available on non-Zendesk site, starting basic tracking');
+        // Track without auth for now - just log activity patterns
+        setupActivityListeners();
+        resetIdleTimer();
+        
+        // Start tracking immediately even without auth
+        emitStateIfChanged(true, true);
+        
+        // Try to bootstrap every 30 seconds if we're on a tracked domain
+        const tryGetAuth = async () => {
+          const stored = lsGet('jwt', null);
+          if (stored) {
+            const authStatus = loadAuth();
+            if (authStatus === true && state.jwt) {
+              log('Found auth tokens from another tab, starting full tracking');
+              startHeartbeat();
+              emitStateIfChanged(true);
+            }
+          }
+        };
+        
+        // Check for auth tokens every 30 seconds
+        setInterval(tryGetAuth, 30000);
+        setTimeout(tryGetAuth, 1000); // Try once immediately
       }
     }
 
