@@ -203,11 +203,10 @@
         return false;
       }
       
-      const b = await fetch(`${CONFIG.BACKEND_URL}/auth/bootstrap`, {
+      const b = await gmFetch(`${CONFIG.BACKEND_URL}/auth/bootstrap`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id, email: user.email, name: user.name }),
-        credentials: 'omit'  // Explicitly omit credentials
+        body: JSON.stringify({ user_id: user.id, email: user.email, name: user.name })
       });
       if (!b.ok) {
         log('backend bootstrap failed', b.status);
@@ -248,11 +247,10 @@
     
     try {
       log('refreshing JWT with refresh token');
-      const r = await fetch(`${CONFIG.BACKEND_URL}/auth/refresh`, {
+      const r = await gmFetch(`${CONFIG.BACKEND_URL}/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: state.refreshToken }),
-        credentials: 'omit'
+        body: JSON.stringify({ refresh_token: state.refreshToken })
       });
       
       if (!r.ok) {
@@ -289,7 +287,42 @@
     }
   }
 
-  // Envío de pings
+  // --- Helper: GM "fetch" que salta CORS usando GM_xmlhttpRequest ---
+  function gmFetch(url, { method = 'GET', headers = {}, body = null } = {}) {
+    return new Promise((resolve, reject) => {
+      if (typeof GM_xmlhttpRequest === 'undefined') {
+        // Fallback a fetch normal si no existe GM (userscript desactivado)
+        fetch(url, { method, headers, body, credentials: 'omit', keepalive: true })
+          .then(res => res.text().then(t => ({
+            ok: res.ok, status: res.status, statusText: res.statusText,
+            text: t, json: () => Promise.resolve(t ? JSON.parse(t) : {})
+          })))
+          .then(resolve)
+          .catch(reject);
+        return;
+      }
+      GM_xmlhttpRequest({
+        method,
+        url,
+        headers,
+        data: body,
+        onload: (r) => {
+          const text = r.responseText || '';
+          resolve({
+            ok: r.status >= 200 && r.status < 300,
+            status: r.status,
+            statusText: r.statusText || '',
+            text,
+            json: () => Promise.resolve(text ? JSON.parse(text) : {})
+          });
+        },
+        onerror: (e) => reject(e),
+        ontimeout: () => reject(new Error('GM_xmlhttpRequest timeout')),
+      });
+    });
+  }
+
+  // Envío de pings (usa gmFetch para evitar CORS)
   async function sendPing(kind = 'hb', force = false, allowWithoutAuth = false) {
     // Check if JWT is expired and try to renew
     if (!state.jwt || Date.now() >= state.jwtExpiry) {
@@ -344,14 +377,15 @@
     };
 
     try {
-      log('Sending ping:', payload);
-      // Use fetch instead of sendBeacon to avoid CORS credential issues
-      const r = await fetch(`${CONFIG.BACKEND_URL}/activity`, {
+      log('Sending ping (GM):', payload);
+      const headers = { 'Content-Type': 'application/json' };
+      if (state.jwt && state.jwt !== 'no-auth') {
+        headers['Authorization'] = `Bearer ${state.jwt}`;
+      }
+      const r = await gmFetch(`${CONFIG.BACKEND_URL}/activity`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        keepalive: true,
-        credentials: 'omit'  // Explicitly omit credentials
+        headers,
+        body: JSON.stringify(payload)
       });
 
       log('Ping response:', r.status, r.statusText);
@@ -359,7 +393,7 @@
       if (r.status === 401) {
         log('401 Unauthorized - JWT expired, attempting refresh');
         let renewed = false;
-        
+
         // Try refresh token first
         if (await refreshJWT()) {
           renewed = true;
@@ -367,21 +401,23 @@
           // Fallback to bootstrap if refresh failed
           renewed = true;
         }
-        
+
         if (renewed) {
           // Retry with new JWT
-          payload.jwt = state.jwt;
-          const retry = await fetch(`${CONFIG.BACKEND_URL}/activity`, {
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload), 
-            keepalive: true,
-            credentials: 'omit'
+          payload.jwt = state.jwt || 'no-auth';
+          const retry = await gmFetch(`${CONFIG.BACKEND_URL}/activity`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(state.jwt ? { 'Authorization': `Bearer ${state.jwt}` } : {})
+            },
+            body: JSON.stringify(payload)
           });
           if (!retry.ok) throw new Error('retry http ' + retry.status);
           log('ping retry success', { kind: payload.kind, st: payload.state, tid: payload.ref_ticket_id });
         } else {
-          throw new Error('JWT renewal failed');
+          // Si no hay forma de renovar fuera de Zendesk, no bloqueamos el tracking:
+          log('JWT renewal failed; recording as no-auth');
         }
       } else if (!r.ok) {
         throw new Error('http ' + r.status);
@@ -758,12 +794,15 @@
       };
 
       try {
-        log('Sending test ping:', testPayload);
-        const response = await fetch(`${CONFIG.BACKEND_URL}/activity`, {
+        log('Sending test ping (GM):', testPayload);
+        const headers = { 'Content-Type': 'application/json' };
+        if (state.jwt && state.jwt !== 'no-auth') {
+          headers['Authorization'] = `Bearer ${state.jwt}`;
+        }
+        const response = await gmFetch(`${CONFIG.BACKEND_URL}/activity`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(testPayload),
-          credentials: 'omit'
+          headers,
+          body: JSON.stringify(testPayload)
         });
 
         const result = await response.json();
