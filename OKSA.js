@@ -15,8 +15,7 @@
 // @match        *://*.netflix.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
-// @connect      oksmartaudit-ajehbzfzdyg4e9hd.westeurope-01.azurewebsites.net
-// @connect      westeurope-01.azurewebsites.net
+// @connect      *
 // @run-at       document-start
 // @noframes
 // ==/UserScript==
@@ -288,10 +287,11 @@
   }
 
   // --- Helper: GM "fetch" que salta CORS usando GM_xmlhttpRequest ---
-  function gmFetch(url, { method = 'GET', headers = {}, body = null } = {}) {
+  function gmFetch(url, { method = 'GET', headers = {}, body = null, _redirects = 0 } = {}) {
     return new Promise((resolve, reject) => {
       if (typeof GM_xmlhttpRequest === 'undefined') {
         // Fallback a fetch normal si no existe GM (userscript desactivado)
+        console.log('[OK Smart Audit] GM not available, using fetch fallback');
         fetch(url, { method, headers, body, credentials: 'omit', keepalive: true })
           .then(res => res.text().then(t => ({
             ok: res.ok, status: res.status, statusText: res.statusText,
@@ -301,23 +301,54 @@
           .catch(reject);
         return;
       }
+
+      console.log('[OK Smart Audit] GM request:', { url, method, headers: Object.keys(headers), body: body ? 'present' : 'none', _redirects });
+
       GM_xmlhttpRequest({
         method,
         url,
         headers,
         data: body,
+        timeout: 15000,
+        onprogress: () => {},
         onload: (r) => {
-          const text = r.responseText || '';
-          resolve({
-            ok: r.status >= 200 && r.status < 300,
-            status: r.status,
-            statusText: r.statusText || '',
-            text,
-            json: () => Promise.resolve(text ? JSON.parse(text) : {})
-          });
+          try {
+            const text = r.responseText || '';
+            const status = r.status;
+            const statusText = r.statusText || '';
+            const resp = {
+              ok: status >= 200 && status < 300,
+              status,
+              statusText,
+              text,
+              json: () => Promise.resolve(text ? JSON.parse(text) : {})
+            };
+
+            console.log('[OK Smart Audit] GM response:', { status, statusText, text: text.substring(0, 100) + '...' });
+
+            // Manejo de redirección manual si cambia de host
+            if ((status === 301 || status === 302 || status === 303 || status === 307 || status === 308) && _redirects < 5) {
+              const locHeader = (r.responseHeaders || '').split(/\r?\n/).find(h => /^location:/i.test(h));
+              const location = locHeader ? locHeader.split(':').slice(1).join(':').trim() : null;
+              if (location) {
+                console.log('[OK Smart Audit] Redirect', status, '→', location);
+                return resolve(gmFetch(location, { method, headers, body, _redirects: _redirects + 1 }));
+              }
+            }
+            resolve(resp);
+          } catch (e) {
+            console.error('[OK Smart Audit] onload parse error', e, r);
+            reject(e);
+          }
         },
-        onerror: (e) => reject(e),
-        ontimeout: () => reject(new Error('GM_xmlhttpRequest timeout')),
+        onerror: (e) => {
+          console.error('[OK Smart Audit] GM onerror', e, { url, method, headers });
+          reject(e);
+        },
+        ontimeout: () => {
+          console.error('[OK Smart Audit] GM timeout', { url, method });
+          reject(new Error('GM_xmlhttpRequest timeout'));
+        },
       });
     });
   }
@@ -423,9 +454,23 @@
         throw new Error('http ' + r.status);
       } else {
         log('ping success', { kind: payload.kind, st: payload.state, tid: payload.ref_ticket_id });
+        console.log('✅ Ping sent successfully:', {
+          kind: payload.kind,
+          state: payload.state,
+          domain: payload.domain,
+          jwt: payload.jwt !== 'no-auth' ? 'authenticated' : 'no-auth',
+          status: r.status
+        });
       }
     } catch (err) {
       log('ping fail', err);
+      console.error('❌ Ping failed:', {
+        error: err.message,
+        kind: payload.kind,
+        state: payload.state,
+        domain: payload.domain,
+        url: `${CONFIG.BACKEND_URL}/activity`
+      });
     }
   }
 
@@ -807,7 +852,14 @@
 
         const result = await response.json();
         log('Test ping result:', response.status, result);
-        console.log('Test ping result:', response.status, result);
+        console.log('✅ Test ping successful:', {
+          status: response.status,
+          statusText: response.statusText,
+          result,
+          url: `${CONFIG.BACKEND_URL}/activity`,
+          jwt: state.jwt ? 'present' : 'none',
+          domain: location.hostname
+        });
         return { status: response.status, result };
       } catch (error) {
         log('Test ping error:', error);
