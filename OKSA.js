@@ -850,7 +850,7 @@
       const testPayload = {
         ts: new Date().toISOString(),
         jwt: state.jwt || 'no-auth',
-        kind: 'test',
+        kind: 'manual',
         state: getCurrentState(),
         domain: location.hostname,
         path: location.pathname,
@@ -875,18 +875,30 @@
 
         const result = await response.json();
         log('Test ping result:', response.status, result);
-        console.log('✅ Test ping successful:', {
-          status: response.status,
-          statusText: response.statusText,
-          result,
-          url: `${CONFIG.BACKEND_URL}/activity`,
-          jwt: state.jwt ? 'present' : 'none',
-          domain: location.hostname
-        });
+
+        if (response.status >= 200 && response.status < 300) {
+          console.log('✅ Test ping successful:', {
+            status: response.status,
+            statusText: response.statusText,
+            result,
+            url: `${CONFIG.BACKEND_URL}/activity`,
+            jwt: state.jwt ? 'present' : 'none',
+            domain: location.hostname
+          });
+        } else {
+          console.log('❌ Test ping failed:', {
+            status: response.status,
+            statusText: response.statusText,
+            result,
+            url: `${CONFIG.BACKEND_URL}/activity`,
+            jwt: state.jwt ? 'present' : 'none',
+            domain: location.hostname
+          });
+        }
         return { status: response.status, result };
       } catch (error) {
         log('Test ping error:', error);
-        console.error('Test ping error:', error);
+        console.error('❌ Test ping error:', error);
         return { error: error.message };
       }
     },
