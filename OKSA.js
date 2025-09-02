@@ -377,6 +377,38 @@
   }
 
   // Envío de pings (usa gmFetch para evitar CORS)
+  // Get user's IP address (best effort)
+  async function getUserIP() {
+    try {
+      // Try multiple IP detection services
+      const services = [
+        'https://api.ipify.org?format=json',
+        'https://ipapi.co/json/',
+        'https://api.ip.sb/jsonip'
+      ];
+
+      for (const service of services) {
+        try {
+          const response = await gmFetch(service, { timeout: 2000 });
+          if (response.ok) {
+            const data = await response.json();
+            return data.ip || data.query;
+          }
+        } catch (e) {
+          continue; // Try next service
+        }
+      }
+
+      // Fallback: use a hash of user agent + timezone as pseudo-identifier
+      const fallbackId = btoa(navigator.userAgent + Intl.DateTimeFormat().resolvedOptions().timeZone).slice(0, 16);
+      return `fallback_${fallbackId}`;
+
+    } catch (e) {
+      // Ultimate fallback
+      return `unknown_${Date.now()}`;
+    }
+  }
+
   async function sendPing(kind = 'hb', force = false, allowWithoutAuth = false) {
     // Check if JWT is expired and try to renew
     if (!state.jwt || Date.now() >= state.jwtExpiry) {
@@ -427,6 +459,7 @@
       tab_id: state.tabId,
       ref_ticket_id: currentTicketId(),
       domain_category: getDomainCategory(),
+      user_ip: state.userIP || 'unknown', // IP for user identification
       is_tracked_domain: isTrackedDomain()
     };
 
@@ -669,6 +702,15 @@
     if (location.pathname.includes('/api/') || location.pathname.includes('.json')) {
       log('skipping API endpoint');
       return;
+    }
+
+    // Get user IP for activity linking
+    try {
+      state.userIP = await getUserIP();
+      log('User IP detected:', state.userIP);
+    } catch (e) {
+      log('Failed to get user IP, using fallback');
+      state.userIP = `fallback_${Date.now()}`;
     }
 
     const currentDomain = location.hostname.toLowerCase();
