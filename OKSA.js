@@ -282,7 +282,7 @@
     // Check if JWT is expired and try to renew
     if (!state.jwt || Date.now() >= state.jwtExpiry) {
       log('JWT expired, attempting renewal');
-      
+
       // Try refresh token first
       const refreshed = await refreshJWT();
       if (!refreshed) {
@@ -297,11 +297,11 @@
             log('No valid JWT but allowWithoutAuth=true, sending ping anyway');
           }
         } else {
+          // For non-Zendesk sites, don't skip pings - continue with 'no-auth'
           if (!allowWithoutAuth) {
-            log('No valid JWT, skipping ping');
-            return;
+            log('No valid JWT on non-Zendesk site, but allowing ping anyway for tracking');
+            allowWithoutAuth = true; // Force allow for non-Zendesk sites
           }
-          log('No valid JWT but allowWithoutAuth=true, sending ping anyway');
         }
       }
     }
@@ -419,18 +419,28 @@
     const jwtExp = lsGet('jwtExpiry', 0);
     const refreshToken = lsGet('refreshToken', null);
     const refreshExp = lsGet('refreshExpiry', 0);
-    
+
+    let updated = false;
+
     // Update state if we found newer tokens
     if (jwt && jwtExp > state.jwtExpiry) {
       state.jwt = jwt;
       state.jwtExpiry = jwtExp;
       log('synced newer JWT from another tab');
+      updated = true;
     }
-    
+
     if (refreshToken && refreshExp > state.refreshExpiry) {
       state.refreshToken = refreshToken;
       state.refreshExpiry = refreshExp;
       log('synced newer refresh token from another tab');
+      updated = true;
+    }
+
+    // If we got new tokens and we're on a non-Zendesk site, restart heartbeat if needed
+    if (updated && !state.isZendesk && jwt && jwtExp > Date.now()) {
+      log('Got new JWT on non-Zendesk site, restarting heartbeat');
+      startHeartbeat();
     }
   }
 
@@ -585,7 +595,7 @@
     } else if (!state.isZendesk) {
       // Non-Zendesk sites - track activity if we have auth OR try to get auth
       const authStatus = loadAuth();
-      
+
       if (authStatus === true && state.jwt) {
         log('Non-Zendesk site with valid JWT, starting tracking');
         startHeartbeat();
@@ -602,7 +612,12 @@
             resetIdleTimer();
             emitStateIfChanged(true);
           } else {
-            log('Failed to refresh JWT on non-Zendesk site');
+            log('Failed to refresh JWT on non-Zendesk site, starting basic tracking');
+            // Even if refresh fails, start basic tracking
+            setupActivityListeners();
+            resetIdleTimer();
+            startHeartbeat(); // Start heartbeat even without auth
+            emitStateIfChanged(true, true);
           }
         };
         setTimeout(tryRefresh, 500);
@@ -611,11 +626,12 @@
         // Track without auth for now - just log activity patterns
         setupActivityListeners();
         resetIdleTimer();
-        
+
         // Start tracking immediately even without auth
+        startHeartbeat(); // Start heartbeat even without auth
         emitStateIfChanged(true, true);
-        
-        // Try to bootstrap every 30 seconds if we're on a tracked domain
+
+        // Try to get auth from other tabs every 30 seconds
         const tryGetAuth = async () => {
           const stored = lsGet('jwt', null);
           if (stored) {
@@ -627,7 +643,7 @@
             }
           }
         };
-        
+
         // Check for auth tokens every 30 seconds
         setInterval(tryGetAuth, 30000);
         setTimeout(tryGetAuth, 1000); // Try once immediately
@@ -649,13 +665,23 @@
     bootstrap: bootstrapAuth,  // Exponer bootstrap para debug
     stateInfo: () => ({
       authed: !!state.jwt,
+      jwtExpiry: state.jwtExpiry ? new Date(state.jwtExpiry).toISOString() : null,
+      refreshExpiry: state.refreshExpiry ? new Date(state.refreshExpiry).toISOString() : null,
       tab: state.tabId,
       zendesk: state.isZendesk,
-      state: getCurrentState(),
+      currentState: getCurrentState(),
       domain: location.hostname,
       isTracked: isTrackedDomain(),
-      category: getDomainCategory()
+      category: getDomainCategory(),
+      lastActivity: new Date(state.lastActivity).toISOString(),
+      lastTicketId: state.lastTicketId,
+      lastTicketExpiry: state.lastTicketExpiry ? new Date(state.lastTicketExpiry).toISOString() : null,
+      heartbeatActive: !!state.hbTimer
     }),
+    forceSync: () => {
+      log('Manual token sync triggered');
+      syncTokensFromStorage();
+    },
     testPing: async () => {
       const testPayload = {
         ts: new Date().toISOString(),
