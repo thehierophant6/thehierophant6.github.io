@@ -288,11 +288,33 @@
 
   // --- Helper: GM "fetch" que salta CORS usando GM_xmlhttpRequest ---
   function gmFetch(url, { method = 'GET', headers = {}, body = null, _redirects = 0 } = {}) {
+    // Detect available GM API (different userscript managers expose it differently)
+    const GMXHR = (typeof GM_xmlhttpRequest !== 'undefined')
+      ? GM_xmlhttpRequest
+      : (typeof GM !== 'undefined' && typeof GM.xmlHttpRequest === 'function'
+         ? GM.xmlHttpRequest
+         : null);
+
     return new Promise((resolve, reject) => {
-      if (typeof GM_xmlhttpRequest === 'undefined') {
+      if (!GMXHR) {
         // Fallback a fetch normal si no existe GM (userscript desactivado)
-        console.log('[OK Smart Audit] GM not available, using fetch fallback');
-        fetch(url, { method, headers, body, credentials: 'omit', keepalive: true })
+        console.log('[OK Smart Audit] ⚠️ GM not available, using fetch fallback with CORS headers');
+        console.log('[OK Smart Audit] 💡 If this fails with CORS, the script is not running as a userscript');
+
+        // Add CORS headers for the fallback
+        const corsHeaders = {
+          'Content-Type': 'application/json',
+          ...headers
+        };
+
+        fetch(url, {
+          method,
+          headers: corsHeaders,
+          body,
+          credentials: 'omit',
+          keepalive: true,
+          mode: 'cors'  // Explicitly request CORS mode
+        })
           .then(res => res.text().then(t => ({
             ok: res.ok, status: res.status, statusText: res.statusText,
             text: t, json: () => Promise.resolve(t ? JSON.parse(t) : {})
@@ -302,9 +324,10 @@
         return;
       }
 
+      console.log('[OK Smart Audit] ✅ GM available, using GM_xmlhttpRequest');
       console.log('[OK Smart Audit] GM request:', { url, method, headers: Object.keys(headers), body: body ? 'present' : 'none', _redirects });
 
-      GM_xmlhttpRequest({
+      GMXHR({
         method,
         url,
         headers,
