@@ -463,6 +463,9 @@
       is_tracked_domain: isTrackedDomain()
     };
 
+    // Debug: Log the final payload
+    log('Final payload being sent:', JSON.stringify(payload, null, 2));
+
     try {
       log('Sending ping (GM):', payload);
       const headers = { 'Content-Type': 'application/json' };
@@ -712,6 +715,9 @@
       log('Failed to get user IP, using fallback');
       state.userIP = `fallback_${Date.now()}`;
     }
+
+    // Debug: Log state after IP detection
+    log('State after IP detection:', { userIP: state.userIP, jwt: state.jwt });
 
     const currentDomain = location.hostname.toLowerCase();
     log('Current domain:', currentDomain, 'zendesk:', state.isZendesk, 'tracking: ALL_DOMAINS');
