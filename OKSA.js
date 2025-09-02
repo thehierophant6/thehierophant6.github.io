@@ -78,9 +78,11 @@
 
   function isTrackedDomain() {
     const hostname = location.hostname.toLowerCase();
-    return CONFIG.DOMAINS_TO_TRACK.some(domain => 
+    const isTracked = CONFIG.DOMAINS_TO_TRACK.some(domain =>
       hostname.includes(domain.toLowerCase())
     );
+    log('Domain check:', hostname, 'tracked:', isTracked);
+    return isTracked;
   }
 
   function getDomainCategory() {
@@ -328,15 +330,18 @@
     };
 
     try {
+      log('Sending ping:', payload);
       // Use fetch instead of sendBeacon to avoid CORS credential issues
       const r = await fetch(`${CONFIG.BACKEND_URL}/activity`, {
-        method: 'POST', 
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload), 
+        body: JSON.stringify(payload),
         keepalive: true,
         credentials: 'omit'  // Explicitly omit credentials
       });
-      
+
+      log('Ping response:', r.status, r.statusText);
+
       if (r.status === 401) {
         log('401 Unauthorized - JWT expired, attempting refresh');
         let renewed = false;
@@ -367,7 +372,7 @@
       } else if (!r.ok) {
         throw new Error('http ' + r.status);
       } else {
-        log('ping', { kind: payload.kind, st: payload.state, tid: payload.ref_ticket_id });
+        log('ping success', { kind: payload.kind, st: payload.state, tid: payload.ref_ticket_id });
       }
     } catch (err) {
       log('ping fail', err);
@@ -642,8 +647,42 @@
       authed: !!state.jwt,
       tab: state.tabId,
       zendesk: state.isZendesk,
-      state: getCurrentState()
+      state: getCurrentState(),
+      domain: location.hostname,
+      isTracked: isTrackedDomain(),
+      category: getDomainCategory()
     }),
+    testPing: async () => {
+      const testPayload = {
+        ts: new Date().toISOString(),
+        jwt: state.jwt || 'no-auth',
+        kind: 'test',
+        state: getCurrentState(),
+        domain: location.hostname,
+        path: location.pathname,
+        title: document.title || '',
+        tab_id: state.tabId,
+        ref_ticket_id: currentTicketId(),
+        domain_category: getDomainCategory(),
+        is_tracked_domain: isTrackedDomain()
+      };
+
+      try {
+        const response = await fetch(`${CONFIG.BACKEND_URL}/activity`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(testPayload),
+          credentials: 'omit'
+        });
+
+        const result = await response.json();
+        console.log('Test ping result:', response.status, result);
+        return { status: response.status, result };
+      } catch (error) {
+        console.error('Test ping error:', error);
+        return { error: error.message };
+      }
+    },
     config: { ...CONFIG, BACKEND_URL: '[redacted]' }
   };
 })();
