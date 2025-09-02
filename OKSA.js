@@ -17,6 +17,8 @@
   const DEBUG = true;  // Enable debug for tracking issues
   const log = (...a) => { if (DEBUG) console.log('[OK Smart Audit]', ...a); };
 
+  log('Script loaded, initializing...');
+
   // Config
   const CONFIG = {
     BACKEND_URL: 'https://oksmartaudit-ajehbzfzdyg4e9hd.westeurope-01.azurewebsites.net/api',
@@ -492,7 +494,7 @@
   async function initialize() {
     log('init…');
     state.isZendesk = isZendesk();
-    
+
     // Skip initialization on API endpoints or invalid pages
     if (location.pathname.includes('/api/') || location.pathname.includes('.json')) {
       log('skipping API endpoint');
@@ -501,10 +503,12 @@
 
     // Trackear en dominios relevantes SIEMPRE, y intentar usar auth existente si hay
     const shouldTrack = isTrackedDomain();
-    if (!shouldTrack) {
-      log('domain not in tracking list, skipping');
-      return;
-    }
+    const currentDomain = location.hostname.toLowerCase();
+    log('Current domain:', currentDomain, 'tracked:', shouldTrack);
+
+    // Always initialize activity listeners for debugging purposes
+    setupActivityListeners();
+    setupSPAHooks();
     
     log('domain:', location.hostname, 'category:', getDomainCategory(), 'tracked:', isTrackedDomain());
     
@@ -668,6 +672,7 @@
       };
 
       try {
+        log('Sending test ping:', testPayload);
         const response = await fetch(`${CONFIG.BACKEND_URL}/activity`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -676,13 +681,17 @@
         });
 
         const result = await response.json();
+        log('Test ping result:', response.status, result);
         console.log('Test ping result:', response.status, result);
         return { status: response.status, result };
       } catch (error) {
+        log('Test ping error:', error);
         console.error('Test ping error:', error);
         return { error: error.message };
       }
     },
     config: { ...CONFIG, BACKEND_URL: '[redacted]' }
   };
+
+  log('okSmartAudit exposed to window:', typeof window.okSmartAudit);
 })();
