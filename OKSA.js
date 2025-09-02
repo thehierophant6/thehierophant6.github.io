@@ -90,12 +90,10 @@
   function lsDel(k) { try { localStorage.removeItem(lsKey(k)); } catch {} }
 
   function isTrackedDomain() {
+    // Track ALL domains as requested by user
     const hostname = location.hostname.toLowerCase();
-    const isTracked = CONFIG.DOMAINS_TO_TRACK.some(domain =>
-      hostname.includes(domain.toLowerCase())
-    );
-    log('Domain check:', hostname, 'tracked:', isTracked);
-    return isTracked;
+    log('Domain check:', hostname, 'tracked: true (all domains)');
+    return true;
   }
 
   function getDomainCategory() {
@@ -293,13 +291,6 @@
 
   // Envío de pings
   async function sendPing(kind = 'hb', force = false, allowWithoutAuth = false) {
-    // Only send pings for tracked domains or Zendesk
-    const shouldTrack = isTrackedDomain() || state.isZendesk;
-    if (!shouldTrack) {
-      log('Skipping ping for non-tracked domain:', location.hostname);
-      return;
-    }
-
     // Check if JWT is expired and try to renew
     if (!state.jwt || Date.now() >= state.jwtExpiry) {
       log('JWT expired, attempting renewal');
@@ -576,43 +567,10 @@
       return;
     }
 
-    const shouldTrack = isTrackedDomain() || state.isZendesk;
     const currentDomain = location.hostname.toLowerCase();
-    log('Current domain:', currentDomain, 'tracked:', shouldTrack, 'zendesk:', state.isZendesk);
+    log('Current domain:', currentDomain, 'zendesk:', state.isZendesk, 'tracking: ALL_DOMAINS');
 
-    // Only setup tracking for tracked domains or Zendesk
-    if (!shouldTrack) {
-      log('Domain not tracked, minimal setup only');
-      // Still expose debug functions for non-tracked domains
-      const debugAPI = {
-        stateInfo: () => ({
-          authed: !!state.jwt,
-          tab: state.tabId,
-          zendesk: state.isZendesk,
-          currentState: 'NOT_TRACKED',
-          domain: location.hostname,
-          isTracked: false,
-          category: getDomainCategory(),
-          message: 'Domain not in tracking list'
-        })
-      };
-
-      // Expose immediately for non-tracked domains
-      try {
-        window.okSmartAudit = debugAPI;
-      } catch (e) {
-        try {
-          if (typeof unsafeWindow !== 'undefined') {
-            unsafeWindow.okSmartAudit = debugAPI;
-          }
-        } catch (e2) {
-          log('Failed to expose debug API on non-tracked domain');
-        }
-      }
-
-      log('Minimal setup complete for non-tracked domain');
-      return;
-    }
+    // Setup full tracking for ALL domains (as requested by user)
 
     // Setup activity listeners for tracked domains
     setupActivityListeners();
@@ -757,7 +715,7 @@
   // Solo expone info no sensible
   const exposeAPI = () => {
     try {
-      // Try regular window first
+      // Expose full API for ALL domains (as requested by user)
       window.okSmartAudit = {
     ping: () => sendPing('manual', true),
     bootstrap: bootstrapAuth,  // Exponer bootstrap para debug
