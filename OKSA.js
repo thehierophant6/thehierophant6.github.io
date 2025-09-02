@@ -63,6 +63,7 @@
     isVisible: true,
     hasFocus: typeof document.hasFocus === 'function' ? document.hasFocus() : true,
     isZendesk: false,
+    lastHeartbeatDomain: null,
     hbTimer: null,
     idleTimer: null,
     lastSentState: null,
@@ -127,10 +128,13 @@
 
   // Estado lógico actual
   function getCurrentState() {
+    // Update domain state dynamically
+    state.isZendesk = isZendesk();
+
     // Usar umbral diferente para Zendesk con ticket (lectura permitida)
-    const idleThreshold = (state.isZendesk && state.lastTicketId) ? 
+    const idleThreshold = (state.isZendesk && state.lastTicketId) ?
       CONFIG.IDLE_ZENDESK_MS : CONFIG.IDLE_MS;
-    
+
     const idle = (Date.now() - state.lastActivity) >= idleThreshold;
     if (!state.isVisible || !state.hasFocus) return 'BG';                    // pestaña oculta o sin foco
     if (state.isZendesk) return idle ? 'IDLE_ZENDESK' : 'ZTK';               // foco + Zendesk
@@ -383,7 +387,27 @@
 
   function startHeartbeat() {
     stopHeartbeat();
-    const tick = () => { sendPing('hb'); state.hbTimer = setTimeout(tick, jitter(CONFIG.HEARTBEAT_MS)); };
+    const tick = () => {
+      // Check if domain has changed since last heartbeat
+      const currentDomain = location.hostname;
+      const currentIsZendesk = isZendesk();
+
+      if (currentDomain !== state.lastHeartbeatDomain || currentIsZendesk !== state.isZendesk) {
+        log(`Domain changed in heartbeat: ${state.lastHeartbeatDomain} -> ${currentDomain}`);
+        state.lastHeartbeatDomain = currentDomain;
+        state.isZendesk = currentIsZendesk;
+        // Force a state change ping when domain changes
+        emitStateIfChanged(true, true);
+      } else {
+        sendPing('hb');
+      }
+      state.hbTimer = setTimeout(tick, jitter(CONFIG.HEARTBEAT_MS));
+    };
+
+    // Initialize domain tracking
+    state.lastHeartbeatDomain = location.hostname;
+    state.isZendesk = isZendesk();
+
     state.hbTimer = setTimeout(tick, jitter(CONFIG.HEARTBEAT_MS));
     log('hb start');
   }
@@ -468,7 +492,7 @@
 
     window.addEventListener('beforeunload', () => { sendPing('pagehide', true); });
     window.addEventListener('pagehide',      () => { sendPing('pagehide', true); });
-    
+
     // Cross-tab token synchronization
     window.addEventListener('storage', (e) => {
       if (e.key && e.key.startsWith(CONFIG.STORAGE_PREFIX)) {
@@ -476,6 +500,30 @@
         syncTokensFromStorage();
       }
     });
+
+    // Detect domain changes and force state update
+    let lastDomain = location.hostname;
+    const checkDomainChange = () => {
+      const currentDomain = location.hostname;
+      if (currentDomain !== lastDomain) {
+        log(`Domain changed from ${lastDomain} to ${currentDomain}`);
+        lastDomain = currentDomain;
+        // Update domain state immediately
+        state.isZendesk = isZendesk();
+        // Force a state change ping to capture the domain transition
+        emitStateIfChanged(true, true); // Allow without auth for immediate feedback
+      }
+    };
+
+    // Check for domain changes on navigation events
+    window.addEventListener('popstate', checkDomainChange);
+    window.addEventListener('hashchange', checkDomainChange);
+
+    // Also check periodically for SPA navigation
+    setInterval(checkDomainChange, 1000);
+
+    // Force initial domain check
+    checkDomainChange();
   }
 
   // SPA hooks (Zendesk)
@@ -676,7 +724,11 @@
       lastActivity: new Date(state.lastActivity).toISOString(),
       lastTicketId: state.lastTicketId,
       lastTicketExpiry: state.lastTicketExpiry ? new Date(state.lastTicketExpiry).toISOString() : null,
-      heartbeatActive: !!state.hbTimer
+      heartbeatActive: !!state.hbTimer,
+      lastHeartbeatDomain: state.lastHeartbeatDomain,
+      visibility: state.isVisible,
+      focus: state.hasFocus,
+      lastSentState: state.lastSentState
     }),
     forceSync: () => {
       log('Manual token sync triggered');
