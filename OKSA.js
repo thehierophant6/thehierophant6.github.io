@@ -1,12 +1,22 @@
 // ==UserScript==
 // @name         OK Smart Audit
 // @namespace    https://okmobility.com/
-// @version      1.3.0
+// @version      1.3.1
 // @description  Multi-domain activity tracker with enhanced Zendesk support
 // @author       OK Mobility
 // @match        *://*/*
+// @match        *://*.zendesk.com/*
+// @match        *://*.youtube.com/*
+// @match        *://*.google.com/*
+// @match        *://*.facebook.com/*
+// @match        *://*.twitter.com/*
+// @match        *://*.instagram.com/*
+// @match        *://*.gmail.com/*
+// @match        *://*.netflix.com/*
 // @grant        GM_xmlhttpRequest
+// @grant        unsafeWindow
 // @connect      oksmartaudit-ajehbzfzdyg4e9hd.westeurope-01.azurewebsites.net
+// @connect      westeurope-01.azurewebsites.net
 // @run-at       document-start
 // @noframes
 // ==/UserScript==
@@ -283,6 +293,13 @@
 
   // Envío de pings
   async function sendPing(kind = 'hb', force = false, allowWithoutAuth = false) {
+    // Only send pings for tracked domains or Zendesk
+    const shouldTrack = isTrackedDomain() || state.isZendesk;
+    if (!shouldTrack) {
+      log('Skipping ping for non-tracked domain:', location.hostname);
+      return;
+    }
+
     // Check if JWT is expired and try to renew
     if (!state.jwt || Date.now() >= state.jwtExpiry) {
       log('JWT expired, attempting renewal');
@@ -559,22 +576,52 @@
       return;
     }
 
-    // Trackear en dominios relevantes SIEMPRE, y intentar usar auth existente si hay
-    const shouldTrack = isTrackedDomain();
+    const shouldTrack = isTrackedDomain() || state.isZendesk;
     const currentDomain = location.hostname.toLowerCase();
-    log('Current domain:', currentDomain, 'tracked:', shouldTrack);
+    log('Current domain:', currentDomain, 'tracked:', shouldTrack, 'zendesk:', state.isZendesk);
 
-    // Always initialize activity listeners for debugging purposes
+    // Only setup tracking for tracked domains or Zendesk
+    if (!shouldTrack) {
+      log('Domain not tracked, minimal setup only');
+      // Still expose debug functions for non-tracked domains
+      const debugAPI = {
+        stateInfo: () => ({
+          authed: !!state.jwt,
+          tab: state.tabId,
+          zendesk: state.isZendesk,
+          currentState: 'NOT_TRACKED',
+          domain: location.hostname,
+          isTracked: false,
+          category: getDomainCategory(),
+          message: 'Domain not in tracking list'
+        })
+      };
+
+      // Expose immediately for non-tracked domains
+      try {
+        window.okSmartAudit = debugAPI;
+      } catch (e) {
+        try {
+          if (typeof unsafeWindow !== 'undefined') {
+            unsafeWindow.okSmartAudit = debugAPI;
+          }
+        } catch (e2) {
+          log('Failed to expose debug API on non-tracked domain');
+        }
+      }
+
+      log('Minimal setup complete for non-tracked domain');
+      return;
+    }
+
+    // Setup activity listeners for tracked domains
     setupActivityListeners();
     setupSPAHooks();
-    
+
     log('domain:', location.hostname, 'category:', getDomainCategory(), 'tracked:', isTrackedDomain());
-    
+
     // Clean legacy storage once
     cleanLegacyStorage();
-    
-    setupActivityListeners();
-    setupSPAHooks();
 
     // Only try bootstrap on Zendesk
     if (state.isZendesk) {
@@ -708,7 +755,10 @@
   }
 
   // Solo expone info no sensible
-  window.okSmartAudit = {
+  const exposeAPI = () => {
+    try {
+      // Try regular window first
+      window.okSmartAudit = {
     ping: () => sendPing('manual', true),
     bootstrap: bootstrapAuth,  // Exponer bootstrap para debug
     stateInfo: () => ({
@@ -769,7 +819,26 @@
       }
     },
     config: { ...CONFIG, BACKEND_URL: '[redacted]' }
+      };
+
+      log('okSmartAudit exposed to window');
+    } catch (e) {
+      // Try unsafeWindow for sites with strict CSP
+      try {
+        if (typeof unsafeWindow !== 'undefined') {
+          unsafeWindow.okSmartAudit = window.okSmartAudit;
+          log('okSmartAudit exposed to unsafeWindow');
+        } else {
+          log('Failed to expose okSmartAudit API:', e.message);
+        }
+      } catch (e2) {
+        log('Failed to expose okSmartAudit API:', e.message, e2.message);
+      }
+    }
   };
 
-  log('okSmartAudit exposed to window:', typeof window.okSmartAudit);
+  // Call exposeAPI after a short delay to ensure DOM is ready
+  setTimeout(exposeAPI, 100);
+
+  log('okSmartAudit API setup complete');
 })();
