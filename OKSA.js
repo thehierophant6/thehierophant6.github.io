@@ -293,12 +293,11 @@
             log('No valid JWT but allowWithoutAuth=true, sending ping anyway');
           }
         } else {
-          // Siempre permitir en sitios no-Zendesk para tracking universal
-          if (!allowWithoutAuth && state.isZendesk) {
-            log('No valid JWT on Zendesk, skipping ping');
+          if (!allowWithoutAuth) {
+            log('No valid JWT, skipping ping');
             return;
           }
-          log('No valid JWT but continuing - universal tracking mode');
+          log('No valid JWT but allowWithoutAuth=true, sending ping anyway');
         }
       }
     }
@@ -403,7 +402,7 @@
     const wait = Math.max(0, due);
     state.idleTimer = setTimeout(() => {
       // Entra a estado IDLE_* (o BG si perdió foco entretanto)
-      emitStateIfChanged(true, true); // Universal tracking
+      emitStateIfChanged(true, !state.isZendesk);
     }, wait + 10); // pequeño margen
   }
 
@@ -433,8 +432,8 @@
     state.lastActivity = Date.now();
     resetIdleTimer();
     // Si veníamos de idle, esto cambia a ZTK/WEB_ACTIVA → emitir borde:
-    // Universal tracking - siempre permitir
-    emitStateIfChanged(false, true);
+    // Permitir tracking sin auth si no estamos en Zendesk
+    emitStateIfChanged(false, !state.isZendesk);
   }
 
   function setupActivityListeners() {
@@ -444,11 +443,11 @@
 
     document.addEventListener('visibilitychange', () => {
       state.isVisible = !document.hidden;
-      emitStateIfChanged(true, true); // Universal tracking
+      emitStateIfChanged(true, !state.isZendesk); // borde exacto al cambiar visibilidad
     });
 
-    window.addEventListener('focus', () => { state.hasFocus = true; emitStateIfChanged(true, true); });
-    window.addEventListener('blur',  () => { state.hasFocus = false; emitStateIfChanged(true, true); });
+    window.addEventListener('focus', () => { state.hasFocus = true; emitStateIfChanged(true, !state.isZendesk); });
+    window.addEventListener('blur',  () => { state.hasFocus = false; emitStateIfChanged(true, !state.isZendesk); });
 
     window.addEventListener('beforeunload', () => { sendPing('pagehide', true); });
     window.addEventListener('pagehide',      () => { sendPing('pagehide', true); });
@@ -495,13 +494,18 @@
       return;
     }
 
-    // Trackear en TODOS los dominios (ya no hay restricción)
-    log('domain:', location.hostname, 'category:', getDomainCategory(), 'tracked: true (universal tracking)');
+    // Trackear en dominios relevantes SIEMPRE, y intentar usar auth existente si hay
+    const shouldTrack = isTrackedDomain();
+    if (!shouldTrack) {
+      log('domain not in tracking list, skipping');
+      return;
+    }
+    
+    log('domain:', location.hostname, 'category:', getDomainCategory(), 'tracked:', isTrackedDomain());
     
     // Clean legacy storage once
     cleanLegacyStorage();
     
-    // SIEMPRE instalar listeners independientemente del dominio
     setupActivityListeners();
     setupSPAHooks();
 
@@ -569,56 +573,55 @@
         // Try again after 10 seconds (final attempt)
         setTimeout(tryBootstrap, 10000);
       }
-    } else {
-      // Non-Zendesk sites - SIEMPRE trackear
-      log('Non-Zendesk site - starting universal tracking');
-      
+    } else if (!state.isZendesk) {
+      // Non-Zendesk sites - track activity if we have auth OR try to get auth
       const authStatus = loadAuth();
       
       if (authStatus === true && state.jwt) {
-        log('Has valid JWT - full tracking mode');
+        log('Non-Zendesk site with valid JWT, starting tracking');
         startHeartbeat();
         resetIdleTimer();
         emitStateIfChanged(true);
       } else if (authStatus === 'refresh_needed') {
-        log('Has refresh token - attempting refresh');
+        log('Non-Zendesk site with refresh token available');
+        // Try to refresh for non-Zendesk sites too
         const tryRefresh = async () => {
           const refreshed = await refreshJWT();
           if (refreshed && state.jwt) {
-            log('JWT refreshed - upgrading to full tracking');
+            log('JWT refreshed successfully on non-Zendesk site');
             startHeartbeat();
             resetIdleTimer();
             emitStateIfChanged(true);
           } else {
-            log('Refresh failed - continuing basic tracking');
+            log('Failed to refresh JWT on non-Zendesk site');
           }
         };
         setTimeout(tryRefresh, 500);
-        
-        // Start basic tracking while refresh happens
-        resetIdleTimer();
-        emitStateIfChanged(true, true);
       } else {
-        log('No auth - basic tracking mode');
-        // Track without auth
+        log('No auth available on non-Zendesk site, starting basic tracking');
+        // Track without auth for now - just log activity patterns
+        setupActivityListeners();
         resetIdleTimer();
+        
+        // Start tracking immediately even without auth
         emitStateIfChanged(true, true);
         
-        // Monitor for auth from other tabs
+        // Try to bootstrap every 30 seconds if we're on a tracked domain
         const tryGetAuth = async () => {
           const stored = lsGet('jwt', null);
           if (stored) {
             const authStatus = loadAuth();
             if (authStatus === true && state.jwt) {
-              log('Auth acquired from another tab - upgrading to full tracking');
+              log('Found auth tokens from another tab, starting full tracking');
               startHeartbeat();
               emitStateIfChanged(true);
             }
           }
         };
         
+        // Check for auth tokens every 30 seconds
         setInterval(tryGetAuth, 30000);
-        setTimeout(tryGetAuth, 1000);
+        setTimeout(tryGetAuth, 1000); // Try once immediately
       }
     }
 
