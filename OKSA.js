@@ -31,14 +31,15 @@
   // Config
   const CONFIG = {
     BACKEND_URL: 'https://oksmartaudit-ajehbzfzdyg4e9hd.westeurope-01.azurewebsites.net/api',
-    HEARTBEAT_MS: 30000,         // latido base
-    JITTER_MS: 2000,             // ±2s
-    IDLE_MS: 60000,              // 60s → idle normal
-    IDLE_ZENDESK_MS: 90000,      // 90s → idle en Zendesk (lectura)
+    HEARTBEAT_MS: 15000,         // latido base reducido (15s para actividad más frecuente)
+    HEARTBEAT_ACTIVE_MS: 8000,   // latido más frecuente durante actividad (8s)
+    JITTER_MS: 1000,             // ±1s reducido
+    IDLE_MS: 180000,             // 3min → idle normal (más tiempo antes de marcar idle)
+    IDLE_ZENDESK_MS: 300000,     // 5min → idle en Zendesk (lectura prolongada)
     REF_TICKET_TTL_MS: 7 * 60 * 1000,
     ZD_HOST_REGEX: /\.zendesk\.com$/,
     STORAGE_PREFIX: 'ok_smart_audit_',
-    STATE_MIN_INTERVAL_MS: 1500,  // anti-flood entre pings de cambio de estado
+    STATE_MIN_INTERVAL_MS: 10000,  // anti-flood aumentado (10s para menos fragmentación)
     DOMAINS_TO_TRACK: [
       'zendesk.com',
       'youtube.com',
@@ -463,9 +464,6 @@
       is_tracked_domain: isTrackedDomain()
     };
 
-    // Debug: Log the final payload
-    log('Final payload being sent:', JSON.stringify(payload, null, 2));
-
     try {
       log('Sending ping (GM):', payload);
       const headers = { 'Content-Type': 'application/json' };
@@ -535,7 +533,16 @@
 
   function startHeartbeat() {
     stopHeartbeat();
+
+    // Track recent activity for adaptive heartbeat
+    let recentActivityCount = 0;
+    let lastActivityCheck = Date.now();
+
     const tick = () => {
+      const now = Date.now();
+      const timeSinceLastActivity = now - state.lastActivity;
+      const isRecentlyActive = timeSinceLastActivity < 30000; // Active in last 30 seconds
+
       // Check if domain has changed since last heartbeat
       const currentDomain = location.hostname;
       const currentIsZendesk = isZendesk();
@@ -549,23 +556,56 @@
       } else {
         sendPing('hb');
       }
-      state.hbTimer = setTimeout(tick, jitter(CONFIG.HEARTBEAT_MS));
+
+      // Use shorter heartbeat interval if user is active
+      const heartbeatInterval = isRecentlyActive ?
+        jitter(CONFIG.HEARTBEAT_ACTIVE_MS) :
+        jitter(CONFIG.HEARTBEAT_MS);
+
+      state.hbTimer = setTimeout(tick, heartbeatInterval);
+
+      // Log activity status every minute
+      if (now - lastActivityCheck > 60000) {
+        log(`Heartbeat: ${isRecentlyActive ? 'ACTIVE' : 'QUIET'} mode, next ping in ${(heartbeatInterval/1000).toFixed(1)}s`);
+        lastActivityCheck = now;
+      }
     };
 
     // Initialize domain tracking
     state.lastHeartbeatDomain = location.hostname;
     state.isZendesk = isZendesk();
 
-    state.hbTimer = setTimeout(tick, jitter(CONFIG.HEARTBEAT_MS));
-    log('hb start');
+    state.hbTimer = setTimeout(tick, jitter(CONFIG.HEARTBEAT_ACTIVE_MS)); // Start with active mode
+    log('hb start (adaptive mode)');
   }
   function stopHeartbeat() { if (state.hbTimer) { clearTimeout(state.hbTimer); state.hbTimer = null; log('hb stop'); } }
 
   // Emisión inmediata si el estado cambia (focus/visibility/idle)
   function emitStateIfChanged(force=false, allowWithoutAuth=false) {
     const cur = getCurrentState();
+
+    // Only send ping if state actually changed OR forced
     if (state.lastSentState !== cur || force) {
+      const now = Date.now();
+
+      // Check anti-flood timer (unless forced)
+      if (!force && (now - state.lastStateEmitAt) < CONFIG.STATE_MIN_INTERVAL_MS) {
+        log(`State change throttled: ${state.lastSentState} -> ${cur} (${(now - state.lastStateEmitAt)/1000}s ago)`);
+        return; // Skip this ping to prevent flooding
+      }
+
+      // Skip sending ping if it's just a quick BG->WEB_ACTIVA transition (common with tab switching)
+      if (!force && state.lastSentState === 'BG' && cur === 'WEB_ACTIVA') {
+        const timeInBg = now - (state.lastStateEmitAt || 0);
+        if (timeInBg < 3000) { // Less than 3 seconds in BG
+          log(`Skipping quick BG->WEB_ACTIVA transition (${timeInBg/1000}s)`);
+          return;
+        }
+      }
+
+      // Send the ping
       void sendPing('state', force, allowWithoutAuth);
+      state.lastStateEmitAt = now;
     }
   }
 
@@ -616,30 +656,81 @@
     }
   }
 
-  // Listeners
+  // Activity tracking with throttling to prevent spam
+  let activityThrottleTimer = null;
+
   function trackActivity() {
-    state.lastActivity = Date.now();
+    const now = Date.now();
+
+    // Throttle activity tracking to prevent spam from mousemove/scroll events
+    if (activityThrottleTimer) return;
+
+    activityThrottleTimer = setTimeout(() => {
+      activityThrottleTimer = null;
+    }, 500); // Only process one activity event per 500ms
+
+    state.lastActivity = now;
     resetIdleTimer();
-    // Si veníamos de idle, esto cambia a ZTK/WEB_ACTIVA → emitir borde:
-    // Permitir tracking sin auth si no estamos en Zendesk
-    emitStateIfChanged(false, !state.isZendesk);
+
+    // Only emit state change if we've been idle for a while or if state actually changed
+    const timeSinceLastEmit = now - (state.lastStateEmitAt || 0);
+    const wasIdle = timeSinceLastEmit > 30000; // More than 30 seconds since last ping
+
+    if (wasIdle) {
+      // Si veníamos de idle, emitir cambio de estado
+      emitStateIfChanged(false, !state.isZendesk);
+    }
   }
 
   function setupActivityListeners() {
-    ['mousedown','mousemove','keydown','scroll','touchstart','pointerdown','pointermove','wheel'].forEach(ev =>
-      document.addEventListener(ev, trackActivity, { passive: true })
-    );
+    // Use event delegation and throttling for mouse/keyboard events
+    const throttledEvents = ['mousedown', 'keydown', 'scroll', 'wheel'];
+    const immediateEvents = ['touchstart', 'pointerdown'];
 
-    document.addEventListener('visibilitychange', () => {
-      state.isVisible = !document.hidden;
-      emitStateIfChanged(true, !state.isZendesk); // borde exacto al cambiar visibilidad
+    // Throttled events (less frequent)
+    throttledEvents.forEach(ev => {
+      document.addEventListener(ev, trackActivity, { passive: true });
     });
 
-    window.addEventListener('focus', () => { state.hasFocus = true; emitStateIfChanged(true, !state.isZendesk); });
-    window.addEventListener('blur',  () => { state.hasFocus = false; emitStateIfChanged(true, !state.isZendesk); });
+    // Immediate events (more important)
+    immediateEvents.forEach(ev => {
+      document.addEventListener(ev, () => {
+        state.lastActivity = Date.now();
+        resetIdleTimer();
+      }, { passive: true });
+    });
+
+    // Mouse movement - only track significant movements, not every pixel
+    let lastMouseMove = 0;
+    document.addEventListener('mousemove', (e) => {
+      const now = Date.now();
+      if (now - lastMouseMove > 1000) { // Only every 1 second
+        lastMouseMove = now;
+        trackActivity();
+      }
+    }, { passive: true });
+
+    // Focus and visibility changes - these are important, handle immediately
+    document.addEventListener('visibilitychange', () => {
+      state.isVisible = !document.hidden;
+      // Always emit for visibility changes (important state change)
+      emitStateIfChanged(true, !state.isZendesk);
+    });
+
+    window.addEventListener('focus', () => {
+      state.hasFocus = true;
+      // Always emit for focus changes (important state change)
+      emitStateIfChanged(true, !state.isZendesk);
+    });
+
+    window.addEventListener('blur', () => {
+      state.hasFocus = false;
+      // Always emit for blur changes (important state change)
+      emitStateIfChanged(true, !state.isZendesk);
+    });
 
     window.addEventListener('beforeunload', () => { sendPing('pagehide', true); });
-    window.addEventListener('pagehide',      () => { sendPing('pagehide', true); });
+    window.addEventListener('pagehide', () => { sendPing('pagehide', true); });
 
     // Cross-tab token synchronization
     window.addEventListener('storage', (e) => {
@@ -668,7 +759,7 @@
     window.addEventListener('hashchange', checkDomainChange);
 
     // Also check periodically for SPA navigation
-    setInterval(checkDomainChange, 1000);
+    setInterval(checkDomainChange, 2000); // Less frequent domain checks
 
     // Force initial domain check
     checkDomainChange();
@@ -715,9 +806,6 @@
       log('Failed to get user IP, using fallback');
       state.userIP = `fallback_${Date.now()}`;
     }
-
-    // Debug: Log state after IP detection
-    log('State after IP detection:', { userIP: state.userIP, jwt: state.jwt });
 
     const currentDomain = location.hostname.toLowerCase();
     log('Current domain:', currentDomain, 'zendesk:', state.isZendesk, 'tracking: ALL_DOMAINS');
