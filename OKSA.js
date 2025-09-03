@@ -307,7 +307,7 @@
     const punchInKey = `punch_in_${today}`;
     if (!localStorage.getItem(punchInKey)) {
       sendPingInternal({
-        kind: 'mark',
+        kind: 'manual',  // Use legacy-compatible kind
         segment_id: segment_id,
         device_session_id: state.deviceSessionId,
         user_id: state.userId,
@@ -362,10 +362,13 @@
       ? (seg.key.attention === 'active' ? 'ZTK' : 'IDLE_ZENDESK')
       : (seg.key.attention === 'active' ? 'WEB_ACTIVA' : 'IDLE_WEB');
 
+    // Map new segment kinds to legacy backend-compatible kinds
+    const legacyKind = mapSegmentKindToLegacy(kind);
+
     const payload = {
       ts: new Date().toISOString(),
       jwt: state.jwt || 'no-auth',
-      kind,
+      kind: legacyKind,  // Use legacy-compatible kind
       state: legacyState,
       context: seg.key.context,
       attention: seg.key.attention,
@@ -391,6 +394,17 @@
 
     // Send ping (reuse existing sendPing logic but with new payload)
     sendPingInternal(payload);
+  }
+
+  // Map new segment kinds to legacy backend-compatible kinds
+  function mapSegmentKindToLegacy(kind) {
+    const kindMap = {
+      'open': 'state',    // Segment start = state change
+      'beat': 'hb',       // Heartbeat = heartbeat
+      'close': 'state',   // Segment end = state change
+      'mark': 'manual'    // Markers = manual events
+    };
+    return kindMap[kind] || kind; // Fallback to original if not mapped
   }
 
   // Legacy compatibility - map to old getCurrentState for backward compatibility
@@ -730,9 +744,9 @@
     state.userId = mappedUserId;
     log('Identity claimed:', agent.email, '-> user_id:', mappedUserId);
 
-    // Send claim ping to backend
+    // Send claim ping to backend with legacy-compatible kind
     sendPingInternal({
-      kind: 'claim',
+      kind: 'manual',  // Map claim to legacy manual
       device_session_id: state.deviceSessionId,
       user_id: state.userId,
       since: new Date(new Date().setHours(0,0,0,0)).toISOString(),
@@ -843,9 +857,9 @@
   function replayBufferWithUserId(userId) {
     const items = Object.values(state.buffer.items || {});
     for (const item of items) {
-      // Send replay pings
+      // Send replay pings with legacy-compatible kinds
       sendPingInternal({
-        kind: 'open',
+        kind: 'state',  // Map open to legacy state
         segment_id: item.segment_id,
         device_session_id: state.deviceSessionId,
         user_id: userId,
@@ -861,7 +875,7 @@
       });
 
       sendPingInternal({
-        kind: 'close',
+        kind: 'state',  // Map close to legacy state
         segment_id: item.segment_id,
         device_session_id: state.deviceSessionId,
         user_id: userId,
@@ -914,7 +928,7 @@
     if (snap.site === state.currentSegment.key.site && snap.href !== state.lastMarkerHref) {
       // Send page marker
       sendPingInternal({
-        kind: 'mark',
+        kind: 'manual',  // Use legacy-compatible kind
         segment_id: state.currentSegment.segment_id,
         device_session_id: state.deviceSessionId,
         user_id: state.userId,
@@ -968,6 +982,15 @@
 
       if (!r.ok) {
         log('Segment ping failed:', r.status, r.statusText);
+        // Log payload for debugging 400 errors
+        if (r.status === 400) {
+          console.error('[OK Smart Audit] 400 Bad Request payload:', {
+            kind: payload.kind,
+            state: payload.state,
+            segment_id: payload.segment_id,
+            url: `${CONFIG.BACKEND_URL}/activity`
+          });
+        }
       } else {
         log('Segment ping success:', payload.kind, payload.state);
       }
@@ -1321,7 +1344,7 @@
 
         // Punch-out marker
         sendPingInternal({
-          kind: 'mark',
+          kind: 'manual',  // Use legacy-compatible kind
           segment_id: state.currentSegment.segment_id,
           device_session_id: state.deviceSessionId,
           user_id: state.userId,
