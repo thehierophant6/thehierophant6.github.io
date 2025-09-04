@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         OK Smart Audit
 // @namespace    https://okmobility.com/
-// @version      1.3.1
-// @description  Multi-domain activity tracker with enhanced Zendesk support
+// @version      1.3.2
+// @description  Multi-domain activity tracker with enhanced Zendesk support and privacy features
 // @author       OK Mobility
 // @match        *://*/*
 // @match        *://*.zendesk.com/*
@@ -18,6 +18,7 @@
 // @connect      *
 // @run-at       document-start
 // @noframes
+// @require      https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js
 // ==/UserScript==
 
 (function () {
@@ -1001,6 +1002,21 @@
 
   // Envío de pings (usa gmFetch para evitar CORS)
   // Get user's IP address (best effort)
+  // Hash IP address for privacy compliance
+  function hashIP(ip) {
+    if (!ip || typeof ip !== 'string') return null;
+
+    try {
+      // Use the same salt as backend for consistency
+      const salt = 'ok_smart_audit_privacy_salt_2024';
+      const hash = CryptoJS.HmacSHA256(ip, salt);
+      return CryptoJS.enc.Hex.stringify(hash).substring(0, 16);
+    } catch (e) {
+      // Fallback if CryptoJS not available
+      return btoa(ip).replace(/[^a-zA-Z0-9]/g, '').substring(0, 16);
+    }
+  }
+
   async function getUserIP() {
     try {
       // Try multiple IP detection services
@@ -1015,7 +1031,9 @@
           const response = await gmFetch(service, { timeout: 2000 });
           if (response.ok) {
             const data = await response.json();
-            return data.ip || data.query;
+            const rawIP = data.ip || data.query;
+            // Hash the IP for privacy before returning
+            return hashIP(rawIP);
           }
         } catch (e) {
           continue; // Try next service
