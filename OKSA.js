@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         OK Smart Audit
 // @namespace    https://okmobility.com/
-// @version      1.3.2
-// @description  Multi-domain activity tracker with enhanced Zendesk support and privacy features
+// @version      1.3.1
+// @description  Multi-domain activity tracker with enhanced Zendesk support
 // @author       OK Mobility
 // @match        *://*/*
 // @match        *://*.zendesk.com/*
@@ -18,13 +18,12 @@
 // @connect      *
 // @run-at       document-start
 // @noframes
-// @require      https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js
 // ==/UserScript==
 
 (function () {
   'use strict';
 
-  const DEBUG = false;  // Set to true for detailed logging in development
+  const DEBUG = true;  // Enable debug for tracking issues
   const log = (...a) => { if (DEBUG) console.log('[OK Smart Audit]', ...a); };
 
   log('Script loaded, initializing...');
@@ -32,17 +31,10 @@
   // Config
   const CONFIG = {
     BACKEND_URL: 'https://oksmartaudit-ajehbzfzdyg4e9hd.westeurope-01.azurewebsites.net/api',
-    HEARTBEAT_MS: 60000,         // latido base (60s para menos pings)
+    HEARTBEAT_MS: 30000,         // latido base
     JITTER_MS: 2000,             // ±2s
-    // Advanced sessionization config
-    READ_GRACE_WEB_MS: 120000,   // 120s para lectura web activa
-    READ_GRACE_ZD_MS: 180000,    // 180s para lectura Zendesk
-    STATE_STABLE_MS: 5000,       // 5s estabilidad antes de commit
-    BG_ENTER_MS: 3000,           // 3s para detectar BG entrada
-    BG_EXIT_MS: 1500,            // 1.5s para detectar BG salida
-    URL_STABLE_MS: 800,          // 800ms para estabilizar cambios de URL
-    OFFLINE_MS: 15 * 60 * 1000,  // 15min punch-out
-    SEND_ONLY_AFTER_CLAIM: false,     // true = buffer until user_id; false = send + replay
+    IDLE_MS: 60000,              // 60s → idle normal
+    IDLE_ZENDESK_MS: 90000,      // 90s → idle en Zendesk (lectura)
     REF_TICKET_TTL_MS: 7 * 60 * 1000,
     ZD_HOST_REGEX: /\.zendesk\.com$/,
     STORAGE_PREFIX: 'ok_smart_audit_',
@@ -50,7 +42,7 @@
     DOMAINS_TO_TRACK: [
       'zendesk.com',
       'youtube.com',
-      'facebook.com',
+      'facebook.com', 
       'instagram.com',
       'twitter.com',
       'x.com',
@@ -77,6 +69,7 @@
     lastTicketId: null,
     lastTicketExpiry: 0,
     tabId: genTabId(),
+    deviceSessionId: getDeviceSessionId(),
     isVisible: true,
     hasFocus: typeof document.hasFocus === 'function' ? document.hasFocus() : true,
     isZendesk: false,
@@ -84,20 +77,7 @@
     hbTimer: null,
     idleTimer: null,
     lastSentState: null,
-    lastStateEmitAt: 0,
-    // Advanced sessionization state
-    deviceSessionId: getOrMakeDeviceSessionId(),
-    userIP: null,
-    lastInputAt: Date.now(),
-    focusStable: { value: true, since: Date.now() },
-    bgFlag: false,
-    urlStable: { href: location.href, since: Date.now() },
-    pendingUrlTimer: null,
-    currentSegment: null,
-    previewSegment: null,
-    previewSince: 0,
-    lastMarkerHref: null,
-    buffer: loadTodayBuffer()
+    lastStateEmitAt: 0
   };
 
   // Utils
@@ -109,51 +89,31 @@
   function lsGet(k, d=null) { try { const s = localStorage.getItem(lsKey(k)); return s ? JSON.parse(s) : d; } catch { return d; } }
   function lsDel(k) { try { localStorage.removeItem(lsKey(k)); } catch {} }
 
-  // Advanced sessionization utilities
-  function getSiteId(hostname) {
-    if (!hostname) return '';
-    hostname = hostname.toLowerCase().split(':')[0].replace(/^www\./,'');
-    const multi = ['co.uk','org.uk','gov.uk','ac.uk','com.au','net.au','org.au','com.br','com.mx','gob.mx','com.es','org.es','gob.es','edu.es'];
-    const p = hostname.split('.');
-    if (p.length <= 2) return hostname;
-    const last2 = p.slice(-2).join('.');
-    const last3 = p.slice(-3).join('.');
-    return multi.includes(last2) ? last3 : last2;
-  }
-
-  function getOrMakeDeviceSessionId() {
-    const k = 'oksa_device_session_id';
-    let v = localStorage.getItem(k);
-    if (!v) {
-      v = crypto.randomUUID();
-      localStorage.setItem(k, v);
+  // Generate or retrieve stable device session ID
+  function getDeviceSessionId() {
+    try {
+      let sessionId = lsGet('device_session_id');
+      if (!sessionId) {
+        // Create a stable ID based on browser fingerprint
+        const fingerprint = [
+          navigator.userAgent,
+          navigator.language,
+          screen.width + 'x' + screen.height,
+          new Date().getTimezoneOffset()
+        ].join('|');
+        sessionId = 'ds_' + btoa(fingerprint).slice(0, 32) + '_' + Date.now().toString(36);
+        lsSet('device_session_id', sessionId);
+        log('Generated new device session ID:', sessionId);
+      } else {
+        log('Using existing device session ID:', sessionId);
+      }
+      return sessionId;
+    } catch (e) {
+      // Fallback to timestamp-based ID
+      const fallbackId = 'ds_fallback_' + Date.now().toString(36);
+      log('Error generating device session ID, using fallback:', fallbackId);
+      return fallbackId;
     }
-    return v;
-  }
-
-  function todayStr() { const d = new Date(); return d.toISOString().slice(0,10); }
-
-  function loadTodayBuffer() {
-    const raw = localStorage.getItem('oksa_buf');
-    if (!raw) return { day: todayStr(), items: {} };
-    let obj = JSON.parse(raw);
-    if (obj.day !== todayStr()) obj = { day: todayStr(), items: {} };
-    return obj;
-  }
-
-  function saveTodayBuffer(o) { localStorage.setItem('oksa_buf', JSON.stringify(o)); }
-
-  function upsertBuf(id, row) {
-    state.buffer.items[id] = { ...(state.buffer.items[id] || {}), ...row };
-    saveTodayBuffer(state.buffer);
-  }
-
-  function getBuf(id) { return state.buffer.items[id]; }
-
-  function makeSegmentId({device_session_id, key, start_ts}) {
-    const s = `${device_session_id}|${key.context || 'web'}|${key.site || key.domain || ''}|${key.ticket_id || ''}|${key.attention || 'active'}|${key.bg ? '1' : '0'}|${start_ts}`;
-    let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-    return `seg_${Math.abs(h)}`;
   }
 
   function isTrackedDomain() {
@@ -165,46 +125,23 @@
 
   function getDomainCategory() {
     const hostname = location.hostname.toLowerCase();
-
+    
     if (hostname.includes('zendesk.com')) return 'WORK';
-    if (hostname.includes('youtube.com') ||
-        hostname.includes('netflix.com') ||
+    if (hostname.includes('youtube.com') || 
+        hostname.includes('netflix.com') || 
         hostname.includes('tiktok.com')) return 'ENTERTAINMENT';
-    if (hostname.includes('facebook.com') ||
-        hostname.includes('instagram.com') ||
-        hostname.includes('twitter.com') ||
-        hostname.includes('x.com') ||
+    if (hostname.includes('facebook.com') || 
+        hostname.includes('instagram.com') || 
+        hostname.includes('twitter.com') || 
+        hostname.includes('x.com') || 
         hostname.includes('whatsapp.com')) return 'SOCIAL';
-    if (hostname.includes('gmail.com') ||
+    if (hostname.includes('gmail.com') || 
         hostname.includes('outlook.com')) return 'EMAIL';
-    if (hostname.includes('amazon.com') ||
+    if (hostname.includes('amazon.com') || 
         hostname.includes('mercadolibre.com')) return 'SHOPPING';
-    if (hostname.includes('google.com') ||
+    if (hostname.includes('google.com') || 
         hostname.includes('bing.com')) return 'SEARCH';
-
-    return 'OTHER';
-  }
-
-  function getDomainCategoryFromSite(site) {
-    // Get category from normalized site instead of current hostname
-    const siteLower = site.toLowerCase();
-
-    if (siteLower.includes('zendesk.com')) return 'WORK';
-    if (siteLower.includes('youtube.com') ||
-        siteLower.includes('netflix.com') ||
-        siteLower.includes('tiktok.com')) return 'ENTERTAINMENT';
-    if (siteLower.includes('facebook.com') ||
-        siteLower.includes('instagram.com') ||
-        siteLower.includes('twitter.com') ||
-        siteLower.includes('x.com') ||
-        siteLower.includes('whatsapp.com')) return 'SOCIAL';
-    if (siteLower.includes('gmail.com') ||
-        siteLower.includes('outlook.com')) return 'EMAIL';
-    if (siteLower.includes('amazon.com') ||
-        siteLower.includes('mercadolibre.com')) return 'SHOPPING';
-    if (siteLower.includes('google.com') ||
-        siteLower.includes('bing.com')) return 'SEARCH';
-
+    
     return 'OTHER';
   }
 
@@ -224,198 +161,19 @@
   }
   function currentTicketId() { return (state.lastTicketId && Date.now() < state.lastTicketExpiry) ? state.lastTicketId : null; }
 
-  // Advanced sessionization: derive state snapshot
-  function deriveSnapshot() {
-    const now = Date.now();
-    const url = new URL(state.urlStable.href);
-    const site = getSiteId(url.hostname);
-    const context = isZendesk() ? 'zendesk' : 'web';
-    const readGrace = (context === 'zendesk') ? CONFIG.READ_GRACE_ZD_MS : CONFIG.READ_GRACE_WEB_MS;
-
-    // attention: ACTIVE if any input in last readGrace; else IDLE
-    const attention = (now - state.lastInputAt <= readGrace) ? 'active' : 'idle';
-
-    // bg flag with hysteresis already maintained
-    state.bgFlag = !state.focusStable.value;
-
-    // ticket detection for Zendesk - use currentTicketId() to respect TTL
-    const ticket_id = (context === 'zendesk') ? currentTicketId() : null;
-
-    return {
-      context, attention, bg: state.bgFlag, site, domain: url.hostname,
-      ticket_id, href: state.urlStable.href, title: document.title || ''
-    };
-  }
-
-  function sameKey(a, b) {
-    return a && b &&
-      a.context === b.context &&
-      a.attention === b.attention &&
-      a.bg === b.bg &&
-      a.site === b.site &&
-      (a.ticket_id || null) === (b.ticket_id || null);
-  }
-
-  // Segment manager with hysteresis and stability
-  function maybeCommitState() {
-    const snap = deriveSnapshot();
-    const now = Date.now();
-
-    if (!state.previewSegment || !sameKey(state.previewSegment, snap)) {
-      state.previewSegment = snap;
-      state.previewSince = now;
-      return;
-    }
-
-    // If the preview has stabilized long enough, commit/switch if needed
-    if (!state.currentSegment) {
-      if (now - state.previewSince >= CONFIG.STATE_STABLE_MS) {
-        startNewSegment(state.previewSegment, now);
-      }
-      return;
-    }
-
-    if (sameKey(state.currentSegment.key, snap)) {
-      // extend current
-      state.currentSegment.endAt = now;
-    } else if (now - state.previewSince >= CONFIG.STATE_STABLE_MS) {
-      // switch segments
-      closeSegment(state.currentSegment);
-      startNewSegment(state.previewSegment, now);
-    } else {
-      // still stabilizing → keep extending current
-      state.currentSegment.endAt = now;
-    }
-  }
-
-  function startNewSegment(key, ts) {
-    const segment_id = makeSegmentId({
-      device_session_id: state.deviceSessionId,
-      key,
-      start_ts: ts
-    });
-
-    state.currentSegment = {
-      segment_id, key, startAt: ts, endAt: ts, lastBeatAt: 0
-    };
-
-    // Send OPEN ping
-    sendSegmentPing('open', state.currentSegment);
-    log('Started new segment:', key.context, key.attention, key.site);
-
-    // Punch-in marker for first segment of the day
-    const today = todayStr();
-    const punchInKey = `punch_in_${today}`;
-    if (!localStorage.getItem(punchInKey)) {
-      sendPingInternal({
-        kind: 'manual',  // Use legacy-compatible kind
-        segment_id: segment_id,
-        device_session_id: state.deviceSessionId,
-        user_id: state.userId,
-        note_type: 'punch_in',
-        ts: new Date(ts).toISOString(),
-        jwt: state.jwt || 'no-auth'
-      });
-      localStorage.setItem(punchInKey, 'true');
-      log('Punch-in marker sent for today');
-    }
-
-    // Cache for potential replay (if anonymous)
-    cacheForReplay(state.currentSegment);
-  }
-
-  function closeSegment(seg) {
-    if (!seg) return;
-    sendSegmentPing('close', seg);
-    log('Closed segment:', seg.key.context, seg.key.attention, seg.key.site);
-    finalizeInBuffer(seg);
-    state.currentSegment = null;
-  }
-
-  function cacheForReplay(seg) {
-    if (state.userId) return; // no need once identified
-    upsertBuf(seg.segment_id, {
-      segment_id: seg.segment_id,
-      key: seg.key,
-      startAt: seg.startAt,
-      endAt: seg.endAt,
-      user_id: null
-    });
-  }
-
-  function finalizeInBuffer(seg) {
-    if (state.userId) return; // if still anon, keep final endAt for replay
-    upsertBuf(seg.segment_id, { ...getBuf(seg.segment_id), endAt: seg.endAt });
-  }
-
-  function sendSegmentPing(kind, seg) {
-    // Backend-agnostic: if SEND_ONLY_AFTER_CLAIM is true, buffer until user_id is known
-    if (CONFIG.SEND_ONLY_AFTER_CLAIM && !state.userId) {
-      // Don't send yet, just buffer locally
-      cacheForReplay(seg);
-      return;
-    }
-
-    const duration_sec = Math.max(0, Math.round((seg.endAt - seg.startAt) / 1000));
-
-    // Map to legacy state for backend compatibility
-    const legacyState = seg.key.context === 'zendesk'
-      ? (seg.key.attention === 'active' ? 'ZTK' : 'IDLE_ZENDESK')
-      : (seg.key.attention === 'active' ? 'WEB_ACTIVA' : 'IDLE_WEB');
-
-    // Map new segment kinds to legacy backend-compatible kinds
-    const legacyKind = mapSegmentKindToLegacy(kind);
-
-    const payload = {
-      ts: new Date().toISOString(),
-      jwt: state.jwt || 'no-auth',
-      kind: legacyKind,  // Use legacy-compatible kind
-      state: legacyState,
-      context: seg.key.context,
-      attention: seg.key.attention,
-      bg: seg.key.bg,
-      domain: seg.key.domain,
-      site: seg.key.site,
-      path: location.pathname,
-      title: seg.key.title || '',
-      href: seg.key.href,
-      tab_id: state.tabId,
-      ref_ticket_id: seg.key.ticket_id || currentTicketId(),
-      domain_category: getDomainCategoryFromSite(seg.key.site),
-      user_ip: state.userIP || 'unknown',
-      is_tracked_domain: isTrackedDomain(),
-      segment_id: seg.segment_id,
-      device_session_id: state.deviceSessionId,
-      user_id: state.userId,
-      start_ts: new Date(seg.startAt).toISOString(),
-      end_ts: new Date(seg.endAt).toISOString(),
-      duration_sec,
-      duration_min: Math.round(duration_sec / 60)
-    };
-
-    // Send ping (reuse existing sendPing logic but with new payload)
-    sendPingInternal(payload);
-  }
-
-  // Map new segment kinds to legacy backend-compatible kinds
-  function mapSegmentKindToLegacy(kind) {
-    const kindMap = {
-      'open': 'state',    // Segment start = state change
-      'beat': 'hb',       // Heartbeat = heartbeat
-      'close': 'state',   // Segment end = state change
-      'mark': 'manual'    // Markers = manual events
-    };
-    return kindMap[kind] || kind; // Fallback to original if not mapped
-  }
-
-  // Legacy compatibility - map to old getCurrentState for backward compatibility
+  // Estado lógico actual
   function getCurrentState() {
-    if (!state.currentSegment) return 'BG'; // fallback
+    // Update domain state dynamically
+    state.isZendesk = isZendesk();
 
-    const key = state.currentSegment.key;
-    if (key.bg) return 'BG';
-    if (key.context === 'zendesk') return key.attention === 'active' ? 'ZTK' : 'IDLE_ZENDESK';
-    return key.attention === 'active' ? 'WEB_ACTIVA' : 'IDLE_WEB';
+    // Usar umbral diferente para Zendesk con ticket (lectura permitida)
+    const idleThreshold = (state.isZendesk && state.lastTicketId) ?
+      CONFIG.IDLE_ZENDESK_MS : CONFIG.IDLE_MS;
+
+    const idle = (Date.now() - state.lastActivity) >= idleThreshold;
+    if (!state.isVisible || !state.hasFocus) return 'BG';                    // pestaña oculta o sin foco
+    if (state.isZendesk) return idle ? 'IDLE_ZENDESK' : 'ZTK';               // foco + Zendesk
+    return idle ? 'IDLE_WEB' : 'WEB_ACTIVA';                                 // foco + otra web
   }
 
   // AUTENTICACIÓN
@@ -557,7 +315,7 @@
   }
 
   // --- Helper: GM "fetch" que salta CORS usando GM_xmlhttpRequest ---
-  function gmFetch(url, { method = 'GET', headers = {}, body = null, timeout = 15000, _redirects = 0 } = {}) {
+  function gmFetch(url, { method = 'GET', headers = {}, body = null, _redirects = 0 } = {}) {
     // Detect available GM API (different userscript managers expose it differently)
     const GMXHR = (typeof GM_xmlhttpRequest !== 'undefined')
       ? GM_xmlhttpRequest
@@ -602,7 +360,7 @@
         url,
         headers,
         data: body,
-        timeout,
+        timeout: 15000,
         onprogress: () => {},
         onload: (r) => {
           try {
@@ -646,439 +404,14 @@
     });
   }
 
-  // Identity detection and claim functionality
-  function detectZendeskAgent() {
-    if (!isZendesk()) return null;
-
-    // Try multiple selectors for Zendesk user info
-    const selectors = [
-      // Modern Zendesk selectors
-      '[data-test-id="user-menu"] [data-test-id="user-email"]',
-      '[data-test-id="user-menu"] .user-email',
-      '[data-test-id="user-info"] .email',
-      '[data-test-id="user-info"] [data-test-id="email"]',
-
-      // Legacy selectors
-      '.user-info .email',
-      '.user-menu .email',
-      '.user-profile .email',
-      '.dropdown-user .email',
-
-      // Generic selectors
-      '.user-email',
-      '.email-address',
-
-      // Try to find any element containing @ in Zendesk interface
-      '[href*="zendesk.com"]',
-      'a[href*="zendesk.com"]'
-    ];
-
-    // First try specific selectors for email
-    for (const selector of selectors) {
-      const el = document.querySelector(selector);
-      if (el) {
-        const text = el.textContent?.trim() || el.getAttribute('href') || '';
-        const emailMatch = text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
-        if (emailMatch) {
-          const email = emailMatch[1].toLowerCase();
-          const name = email.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-          log('Detected Zendesk agent via selector:', selector, 'email:', email, 'name:', name);
-          return { email, name };
-        }
-      }
-    }
-
-    // Try to detect from user menu text
-    const userMenuSelectors = [
-      '[data-test-id="user-menu"]',
-      '.user-menu',
-      '.dropdown-user',
-      '.user-profile'
-    ];
-
-    for (const selector of userMenuSelectors) {
-      const el = document.querySelector(selector);
-      if (el) {
-        const text = el.textContent || '';
-        // Look for email pattern in menu text
-        const emailMatch = text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
-        if (emailMatch) {
-          const email = emailMatch[1].toLowerCase();
-          const name = email.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-          log('Detected Zendesk agent from menu text:', selector, 'email:', email, 'name:', name);
-          return { email, name };
-        }
-
-        // Try to extract name from menu
-        const nameMatch = text.match(/([A-Z][a-z]+ [A-Z][a-z]+)/); // "First Last" pattern
-        if (nameMatch && text.length < 100) { // Avoid matching large blocks of text
-          const name = nameMatch[1];
-          log('Detected Zendesk agent name from menu:', selector, 'name:', name);
-          return { email: null, name };
-        }
-      }
-    }
-
-    // Last resort: try to get from document title or meta tags
-    const title = document.title || '';
-    const emailMatch = title.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
-    if (emailMatch) {
-      const email = emailMatch[1].toLowerCase();
-      const name = email.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-      log('Detected Zendesk agent from title:', 'email:', email, 'name:', name);
-      return { email, name };
-    }
-
-    log('Could not detect Zendesk agent information');
+  // Envío de pings (usa gmFetch para evitar CORS)
+  // Client no longer fetches IP; server infers from headers when needed
+  function getUserIP() {
+    // Server will extract IP from X-Forwarded-For or X-Real-IP headers
     return null;
   }
 
-  async function tryClaimIdentity() {
-    if (state.userId) return; // already known
-    const agent = detectZendeskAgent();
-    if (!agent) return;
-
-    // Map to user_id (you'll need to implement this mapping based on your agents.csv)
-    const mappedUserId = mapAgentToUserId(agent);
-    if (!mappedUserId) return;
-
-    state.userId = mappedUserId;
-    log('Identity claimed:', agent.email, '-> user_id:', mappedUserId);
-
-    // Send claim ping to backend with legacy-compatible kind
-    sendPingInternal({
-      kind: 'manual',  // Map claim to legacy manual
-      device_session_id: state.deviceSessionId,
-      user_id: state.userId,
-      since: new Date(new Date().setHours(0,0,0,0)).toISOString(),
-      ts: new Date().toISOString(),
-      jwt: state.jwt || 'no-auth'
-    });
-
-    // Replay buffered segments with user_id
-    replayBufferWithUserId(state.userId);
-  }
-
-  function mapAgentToUserId(agent) {
-    // Agent mapping based on agents.csv
-    // Priority: 1) Exact email match, 2) Name match, 3) Fallback to device session ID
-    // This ensures anonymous activity gets properly attributed when user is identified
-    //
-    // IMPORTANT: Validate these mappings against your Zendesk agent IDs
-    // Use okSmartAudit.testAgentDetection() in Zendesk to verify mappings
-    const agentsMap = {
-      // CS Area
-      "carlos.zuleta@okmobility.com": "28412205851293",
-      "camila.guerrero@okmobility.com": "27313100569885",
-      "david.narvaez@okmobility.com": "19278727185053",
-      "diego.caceres@okmobility.com": "28602592993821",
-      "jairo.olave@okmobility.com": "22677476560669",
-      "linda.lopez@okmobility.com": "28412943512477",
-      "santiago.bonilla@okmobility.com": "27313026963485",
-      "alexa.marin@okmobility.com": "27313062426397",
-      "jhoan.ortiz@okmobility.com": "25910733930909",
-      "andres.serna@okmobility.com": "28747968046237",
-      "kengy.rangel@okmobility.com": "25468898348829",
-      "ketty.calderon@okmobility.com": "24415425168541",
-      "marcos.marquines@okmobility.com": "28436277498781",
-      "pablo.hurtado@okmobility.com": "28749629487901",
-      "vanessa.velasco@okmobility.com": "28752195817885",
-
-      // PT Area
-      "alexandra.mezu@okmobility.com": "21153041522973",
-      "juan.david.munoz@okmobility.com": "23651660604317",
-
-      // UP Area
-      "cristian.david.campo@okmobility.com": "27313182061341",
-      "camilo.palacio@okmobility.com": "21153027650461",
-
-      // ATC Area
-      "noel.lopez@okmobility.com": "25461977010205",
-      "daniela.gaitan@okmobility.com": "25910691932317",
-      "ivan.enriquez@okmobility.com": "19540488993565",
-
-      // ResponsablesCC
-      "responsablescc@okmobility.com": "7838939114525"
-    };
-
-    // Name-based mapping (fallback for cases where email might not match exactly)
-    const nameMap = {
-      "Carlos Zuleta": "28412205851293",
-      "Camila Guerrero": "27313100569885",
-      "David Narváez": "19278727185053",
-      "Diego Cáceres": "28602592993821",
-      "Jairo Olave": "22677476560669",
-      "Linda Lopez": "28412943512477",
-      "Santiago Bonilla": "27313026963485",
-      "Alexa Marín": "27313062426397",
-      "Jhoan Ortiz": "25910733930909",
-      "Andrés Serna": "28747968046237",
-      "Kengy Rangel": "25468898348829",
-      "Ketty Calderon": "24415425168541",
-      "Marcos Marquines": "28436277498781",
-      "Pablo Hurtado": "28749629487901",
-      "Vanessa Velasco": "28752195817885",
-      "Alexandra Mezu": "21153041522973",
-      "Juan David Muñoz": "23651660604317",
-      "Cristian David Campo": "27313182061341",
-      "Camilo Palacio": "21153027650461",
-      "Noel Lopez": "25461977010205",
-      "Daniela Gaitan": "25910691932317",
-      "Iván Enriquez": "19540488993565",
-      "ResponsablesCC": "7838939114525"
-    };
-
-    // Try email first
-    if (agent.email) {
-      const emailKey = agent.email.toLowerCase();
-      if (agentsMap[emailKey]) {
-        log('Agent mapped by email:', agent.email, '->', agentsMap[emailKey]);
-        return agentsMap[emailKey];
-      }
-    }
-
-    // Try name as fallback
-    if (agent.name) {
-      if (nameMap[agent.name]) {
-        log('Agent mapped by name:', agent.name, '->', nameMap[agent.name]);
-        return nameMap[agent.name];
-      }
-    }
-
-    // If no match found, log and return device session ID as fallback
-    log('Agent not found in mapping, using device session ID as fallback:', {
-      detectedEmail: agent.email,
-      detectedName: agent.name,
-      deviceSessionId: state.deviceSessionId
-    });
-
-    return state.deviceSessionId;
-  }
-
-  function replayBufferWithUserId(userId) {
-    const items = Object.values(state.buffer.items || {});
-    for (const item of items) {
-      // Send replay pings with legacy-compatible kinds
-      sendPingInternal({
-        kind: 'state',  // Map open to legacy state
-        segment_id: item.segment_id,
-        device_session_id: state.deviceSessionId,
-        user_id: userId,
-        context: item.key.context,
-        attention: item.key.attention,
-        bg: item.key.bg,
-        site: item.key.site,
-        domain: item.key.domain,
-        start_ts: new Date(item.startAt).toISOString(),
-        ts: new Date().toISOString(),
-        jwt: state.jwt || 'no-auth',
-        upsert: true
-      });
-
-      sendPingInternal({
-        kind: 'state',  // Map close to legacy state
-        segment_id: item.segment_id,
-        device_session_id: state.deviceSessionId,
-        user_id: userId,
-        end_ts: new Date(item.endAt).toISOString(),
-        ts: new Date().toISOString(),
-        jwt: state.jwt || 'no-auth',
-        upsert: true
-      });
-    }
-
-    // Clear buffer after successful replay
-    state.buffer = { day: todayStr(), items: {} };
-    saveTodayBuffer(state.buffer);
-    log('Replayed', items.length, 'buffered segments for user', userId);
-  }
-
-  // Input tracking with hysteresis
-  function onFocusMaybeChanged() {
-    const hasFocus = document.hasFocus() && !document.hidden;
-    const now = Date.now();
-
-    if (hasFocus !== state.focusStable.value) {
-      const minPersist = hasFocus ? CONFIG.BG_EXIT_MS : CONFIG.BG_ENTER_MS;
-      const snapshotAt = now;
-
-      setTimeout(() => {
-        if ((document.hasFocus() && !document.hidden) === hasFocus &&
-            snapshotAt >= state.focusStable.since) {
-          state.focusStable = { value: hasFocus, since: now };
-          log('Focus stable changed:', hasFocus);
-        }
-      }, minPersist);
-    }
-  }
-
-  // URL stabilization
-  function scheduleUrlStableCheck() {
-    if (state.pendingUrlTimer) clearTimeout(state.pendingUrlTimer);
-    state.pendingUrlTimer = setTimeout(() => {
-      if (location.href !== state.urlStable.href) {
-        state.urlStable = { href: location.href, since: Date.now() };
-        emitPageMarkerIfNeeded();
-      }
-    }, CONFIG.URL_STABLE_MS);
-  }
-
-  function emitPageMarkerIfNeeded() {
-    if (!state.currentSegment) return;
-    const snap = deriveSnapshot();
-    if (snap.site === state.currentSegment.key.site && snap.href !== state.lastMarkerHref) {
-      // Send page marker
-      sendPingInternal({
-        kind: 'manual',  // Use legacy-compatible kind
-        segment_id: state.currentSegment.segment_id,
-        device_session_id: state.deviceSessionId,
-        user_id: state.userId,
-        note_type: 'page',
-        href: snap.href,
-        title: snap.title,
-        ts: new Date().toISOString(),
-        jwt: state.jwt || 'no-auth'
-      });
-      state.lastMarkerHref = snap.href;
-    }
-  }
-
-  // Internal ping sender (replaces direct sendPing calls)
-  async function sendPingInternal(payload) {
-    try {
-      log('Sending segment ping (GM):', payload.kind, payload.state, payload.segment_id);
-      const headers = { 'Content-Type': 'application/json' };
-      if (state.jwt && state.jwt !== 'no-auth') {
-        headers['Authorization'] = `Bearer ${state.jwt}`;
-      }
-
-      let r = await gmFetch(`${CONFIG.BACKEND_URL}/activity`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(payload)
-      });
-
-      log('Segment ping response:', r.status, payload.kind);
-
-      // Handle 401 - JWT expired, try to refresh and retry once
-      if (r.status === 401) {
-        log('Segment ping 401 - JWT expired, attempting refresh');
-        const refreshed = await refreshJWT();
-        if (refreshed && state.jwt) {
-          log('JWT refreshed successfully, retrying segment ping');
-          const headers2 = {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${state.jwt}`
-          };
-          r = await gmFetch(`${CONFIG.BACKEND_URL}/activity`, {
-            method: 'POST',
-            headers: headers2,
-            body: JSON.stringify({ ...payload, jwt: state.jwt })
-          });
-          log('Segment ping retry response:', r.status, payload.kind);
-        } else {
-          log('JWT refresh failed, segment ping will fail');
-        }
-      }
-
-      if (!r.ok) {
-        log('Segment ping failed:', r.status, r.statusText);
-        // Log payload for debugging 400 errors
-        if (r.status === 400) {
-          console.error('[OK Smart Audit] 400 Bad Request payload:', {
-            kind: payload.kind,
-            state: payload.state,
-            segment_id: payload.segment_id,
-            url: `${CONFIG.BACKEND_URL}/activity`
-          });
-        }
-      } else {
-        log('Segment ping success:', payload.kind, payload.state);
-      }
-    } catch (err) {
-      log('Segment ping error:', err);
-    }
-  }
-
-  // Envío de pings (usa gmFetch para evitar CORS)
-  // Get user's IP address (best effort)
-  // Hash IP address for privacy compliance
-  function hashIP(ip) {
-    if (!ip || typeof ip !== 'string') return null;
-
-    try {
-      // Use the same salt as backend for consistency
-      const salt = 'ok_smart_audit_privacy_salt_2024';
-      const hash = CryptoJS.HmacSHA256(ip, salt);
-      return CryptoJS.enc.Hex.stringify(hash).substring(0, 16);
-    } catch (e) {
-      // Fallback if CryptoJS not available
-      return btoa(ip).replace(/[^a-zA-Z0-9]/g, '').substring(0, 16);
-    }
-  }
-
-  async function getUserIP() {
-    try {
-      // Try multiple IP detection services
-      const services = [
-        'https://api.ipify.org?format=json',
-        'https://ipapi.co/json/',
-        'https://api.ip.sb/jsonip'
-      ];
-
-      for (const service of services) {
-        try {
-          const response = await gmFetch(service, { timeout: 2000 });
-          if (response.ok) {
-            const data = await response.json();
-            const rawIP = data.ip || data.query;
-            // Hash the IP for privacy before returning
-            return hashIP(rawIP);
-          }
-        } catch (e) {
-          continue; // Try next service
-        }
-      }
-
-      // Fallback: use a hash of user agent + timezone as pseudo-identifier
-      const fallbackId = btoa(navigator.userAgent + Intl.DateTimeFormat().resolvedOptions().timeZone).slice(0, 16);
-      return `fallback_${fallbackId}`;
-
-    } catch (e) {
-      // Ultimate fallback
-      return `unknown_${Date.now()}`;
-    }
-  }
-
-  // Legacy sendPing wrapper - routes to new segment system
   async function sendPing(kind = 'hb', force = false, allowWithoutAuth = false) {
-    // For legacy compatibility, if we have a current segment, send a beat
-    if (state.currentSegment && kind === 'hb') {
-      sendSegmentPing('beat', state.currentSegment);
-      return;
-    }
-
-    // For manual pings or special cases, create a one-off ping
-    const payload = {
-      ts: new Date().toISOString(),
-      jwt: state.jwt || 'no-auth',
-      kind,
-      state: getCurrentState(),
-      domain: location.hostname,
-      path: location.pathname,
-      title: (document.title || '').slice(0, 140),
-      tab_id: state.tabId,
-      ref_ticket_id: currentTicketId(),
-      domain_category: getDomainCategory(),
-      user_ip: state.userIP || 'unknown',
-      is_tracked_domain: isTrackedDomain()
-    };
-
-    await sendPingInternal(payload);
-  }
-
-  // Original sendPing function (renamed to avoid conflicts)
-  async function sendPingLegacy(kind = 'hb', force = false, allowWithoutAuth = false) {
     // Check if JWT is expired and try to renew
     if (!state.jwt || Date.now() >= state.jwtExpiry) {
       log('JWT expired, attempting renewal');
@@ -1117,6 +450,18 @@
       state.lastStateEmitAt = now;
     }
 
+    // Ensure we always have device_session_id
+    if (!state.deviceSessionId) {
+      state.deviceSessionId = getDeviceSessionId();
+    }
+
+    // Generate stable segment_id per page/ticket context
+    const segmentScope = location.hostname + '|' + (currentTicketId() || '');
+    if (!state.segmentId || state.segmentScope !== segmentScope) {
+      state.segmentId = `seg_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+      state.segmentScope = segmentScope;
+    }
+
     const payload = {
       ts: new Date().toISOString(),
       jwt: state.jwt || 'no-auth', // Permite funcionar sin JWT
@@ -1126,9 +471,12 @@
       path: location.pathname,
       title: (document.title || '').slice(0, 140),
       tab_id: state.tabId,
+      device_session_id: state.deviceSessionId, // Stable device session identifier
+      segment_id: state.segmentId, // Stable per page/ticket context
       ref_ticket_id: currentTicketId(),
       domain_category: getDomainCategory(),
-      user_ip: state.userIP || 'unknown', // IP for user identification
+      // Let the server infer IP from X-Forwarded-For / X-Real-IP
+      user_ip: null,
       is_tracked_domain: isTrackedDomain()
     };
 
@@ -1199,72 +547,56 @@
     }
   }
 
-  // New heartbeat system with segments
   function startHeartbeat() {
     stopHeartbeat();
+    const tick = () => {
+      // Check if domain has changed since last heartbeat
+      const currentDomain = location.hostname;
+      const currentIsZendesk = isZendesk();
 
-    // Send heartbeat every HEARTBEAT_MS
-    const heartbeatTick = () => {
-      if (!amLeader()) return; // only leader tab emits
-      if (!state.currentSegment) return;
-
-      const now = Date.now();
-      // Send heartbeat to keep presence alive
-      sendSegmentPing('beat', state.currentSegment);
-      state.currentSegment.lastBeatAt = now;
-
-      state.hbTimer = setTimeout(heartbeatTick, CONFIG.HEARTBEAT_MS);
+      if (currentDomain !== state.lastHeartbeatDomain || currentIsZendesk !== state.isZendesk) {
+        log(`Domain changed in heartbeat: ${state.lastHeartbeatDomain} -> ${currentDomain}`);
+        state.lastHeartbeatDomain = currentDomain;
+        state.isZendesk = currentIsZendesk;
+        // Force a state change ping when domain changes
+        emitStateIfChanged(true, true);
+      } else {
+        sendPing('hb');
+      }
+      state.hbTimer = setTimeout(tick, jitter(CONFIG.HEARTBEAT_MS));
     };
 
-    // Main state evaluation loop (2x/sec)
-    const stateTick = () => {
-      maybeCommitState();
-      // Continue the loop
-      state.stateTickTimer = setTimeout(stateTick, 500);
-    };
+    // Initialize domain tracking
+    state.lastHeartbeatDomain = location.hostname;
+    state.isZendesk = isZendesk();
 
-    // Start both loops
-    state.hbTimer = setTimeout(heartbeatTick, CONFIG.HEARTBEAT_MS);
-    state.stateTickTimer = setTimeout(stateTick, 500);
-
-    log('Advanced heartbeat started');
+    state.hbTimer = setTimeout(tick, jitter(CONFIG.HEARTBEAT_MS));
+    log('hb start');
   }
+  function stopHeartbeat() { if (state.hbTimer) { clearTimeout(state.hbTimer); state.hbTimer = null; log('hb stop'); } }
 
-  function stopHeartbeat() {
-    if (state.hbTimer) {
-      clearTimeout(state.hbTimer);
-      state.hbTimer = null;
-    }
-    if (state.stateTickTimer) {
-      clearTimeout(state.stateTickTimer);
-      state.stateTickTimer = null;
-    }
-    log('Heartbeat stopped');
-  }
-
-  // Optional: single-tab leader for multi-tab scenarios
-  function amLeader() {
-    const now = Date.now();
-    const leaderKey = 'oksa_leader_' + state.deviceSessionId;
-    const row = JSON.parse(localStorage.getItem(leaderKey) || '{}');
-
-    if (!row.until || row.until < now) {
-      localStorage.setItem(leaderKey, JSON.stringify({
-        until: now + CONFIG.HEARTBEAT_MS * 1.2
-      }));
-      return true;
-    }
-    return false;
-  }
-
-  // Legacy compatibility - kept minimal for backward compatibility
+  // Emisión inmediata si el estado cambia (focus/visibility/idle)
   function emitStateIfChanged(force=false, allowWithoutAuth=false) {
-    // Optional: emit legacy state ping for compatibility
-    // Comment out if not needed - new engine handles everything
     const cur = getCurrentState();
     if (state.lastSentState !== cur || force) {
       void sendPing('state', force, allowWithoutAuth);
     }
+  }
+
+  // Idle watcher: dispara 'state' al entrar en idle (con umbral dinámico)
+  function resetIdleTimer() {
+    if (state.idleTimer) clearTimeout(state.idleTimer);
+    
+    // Usar umbral diferente para Zendesk con ticket
+    const idleThreshold = (state.isZendesk && state.lastTicketId) ? 
+      CONFIG.IDLE_ZENDESK_MS : CONFIG.IDLE_MS;
+    
+    const due = state.lastActivity + idleThreshold - Date.now();
+    const wait = Math.max(0, due);
+    state.idleTimer = setTimeout(() => {
+      // Entra a estado IDLE_* (o BG si perdió foco entretanto)
+      emitStateIfChanged(true, !state.isZendesk);
+    }, wait + 10); // pequeño margen
   }
 
   // Cross-tab synchronization
@@ -1298,39 +630,29 @@
     }
   }
 
-  // Enhanced activity tracking with input hysteresis
+  // Listeners
   function trackActivity() {
     state.lastActivity = Date.now();
-    state.lastInputAt = Date.now();
-    // The new system handles state changes automatically via maybeCommitState()
+    resetIdleTimer();
+    // Si veníamos de idle, esto cambia a ZTK/WEB_ACTIVA → emitir borde:
+    // Permitir tracking sin auth si no estamos en Zendesk
+    emitStateIfChanged(false, !state.isZendesk);
   }
 
   function setupActivityListeners() {
-    // Input activity tracking
-    ['mousedown','mousemove','keydown','keyup','scroll','touchstart','pointerdown','pointermove','wheel'].forEach(ev =>
+    ['mousedown','mousemove','keydown','scroll','touchstart','pointerdown','pointermove','wheel'].forEach(ev =>
       document.addEventListener(ev, trackActivity, { passive: true })
     );
 
-    // Focus/visibility tracking with hysteresis
-    document.addEventListener('visibilitychange', onFocusMaybeChanged);
-    window.addEventListener('focus', onFocusMaybeChanged);
-    window.addEventListener('blur', onFocusMaybeChanged);
-
-    // URL change tracking with stabilization
-    window.addEventListener('popstate', scheduleUrlStableCheck);
-    window.addEventListener('hashchange', scheduleUrlStableCheck);
-
-    // SPA navigation detection
-    const mo = new MutationObserver(() => scheduleUrlStableCheck());
-    mo.observe(document.documentElement, { childList: true, subtree: true });
-
-    // Page unload - close segment cleanly
-    window.addEventListener('beforeunload', () => {
-      if (state.currentSegment) closeSegment(state.currentSegment);
+    document.addEventListener('visibilitychange', () => {
+      state.isVisible = !document.hidden;
+      emitStateIfChanged(true, !state.isZendesk); // borde exacto al cambiar visibilidad
     });
-    window.addEventListener('pagehide', () => {
-      if (state.currentSegment) closeSegment(state.currentSegment);
-    });
+
+    window.addEventListener('focus', () => { state.hasFocus = true; emitStateIfChanged(true, !state.isZendesk); });
+    window.addEventListener('blur',  () => { state.hasFocus = false; emitStateIfChanged(true, !state.isZendesk); });
+
+    // Final ping will be handled by beforeunload below with sendBeacon
 
     // Cross-tab token synchronization
     window.addEventListener('storage', (e) => {
@@ -1340,42 +662,29 @@
       }
     });
 
-    // Identity detection timer (for Zendesk)
-    if (isZendesk()) {
-      setInterval(tryClaimIdentity, 3000);
-      // Try immediately
-      setTimeout(tryClaimIdentity, 1000);
-    }
-
-    // Offline watchdog
-    setInterval(() => {
-      if (!state.currentSegment) return;
-      const now = Date.now();
-      const lastAny = Math.max(
-        state.currentSegment.endAt,
-        state.lastInputAt,
-        state.focusStable.since,
-        state.urlStable.since
-      );
-      if (now - lastAny > CONFIG.OFFLINE_MS) {
-        log('Offline timeout, sending punch-out and closing segment');
-
-        // Punch-out marker
-        sendPingInternal({
-          kind: 'manual',  // Use legacy-compatible kind
-          segment_id: state.currentSegment.segment_id,
-          device_session_id: state.deviceSessionId,
-          user_id: state.userId,
-          note_type: 'punch_out',
-          ts: new Date(now).toISOString(),
-          jwt: state.jwt || 'no-auth'
-        });
-
-        closeSegment(state.currentSegment);
+    // Detect domain changes and force state update
+    let lastDomain = location.hostname;
+    const checkDomainChange = () => {
+      const currentDomain = location.hostname;
+      if (currentDomain !== lastDomain) {
+        log(`Domain changed from ${lastDomain} to ${currentDomain}`);
+        lastDomain = currentDomain;
+        // Update domain state immediately
+        state.isZendesk = isZendesk();
+        // Force a state change ping to capture the domain transition
+        emitStateIfChanged(true, true); // Allow without auth for immediate feedback
       }
-    }, 10000);
+    };
 
-    log('Advanced activity listeners setup');
+    // Check for domain changes on navigation events
+    window.addEventListener('popstate', checkDomainChange);
+    window.addEventListener('hashchange', checkDomainChange);
+
+    // Also check periodically for SPA navigation
+    setInterval(checkDomainChange, 1000);
+
+    // Force initial domain check
+    checkDomainChange();
   }
 
   // SPA hooks (Zendesk)
@@ -1411,21 +720,15 @@
       return;
     }
 
-    // Get user IP for activity linking
-    try {
-      state.userIP = await getUserIP();
-      log('User IP detected:', state.userIP);
-    } catch (e) {
-      log('Failed to get user IP, using fallback');
-      state.userIP = `fallback_${Date.now()}`;
-    }
+    // Server will extract IP from request headers when needed
+    state.userIP = null;
 
     const currentDomain = location.hostname.toLowerCase();
     log('Current domain:', currentDomain, 'zendesk:', state.isZendesk, 'tracking: ALL_DOMAINS');
 
     // Setup full tracking for ALL domains (as requested by user)
 
-    // Setup activity listeners for tracked domains
+    // Setup activity listeners & SPA hooks
     setupActivityListeners();
     setupSPAHooks();
 
@@ -1434,18 +737,22 @@
     // Clean legacy storage once
     cleanLegacyStorage();
 
-    // Initialize advanced sessionization
-    state.isZendesk = isZendesk();
-    state.urlStable = { href: location.href, since: Date.now() };
-
-    // Only try bootstrap on Zendesk
+    // Start heartbeat everywhere; Zendesk will also attach ticket context
+    if (!state.isZendesk) {
+      startHeartbeat();
+      resetIdleTimer();
+      // Emit initial state right away for non-ZD pages
+      emitStateIfChanged(true, true);
+    }
+    // Only try bootstrap on Zendesk (adds JWT + ZTK capture)
     if (state.isZendesk) {
       const authStatus = loadAuth();
       if (authStatus === true) {
         // Valid JWT, start tracking
         updateTicketRef();
         startHeartbeat();
-        log('Advanced tracking started with valid JWT');
+        resetIdleTimer();
+        emitStateIfChanged(true);
       } else if (authStatus === 'refresh_needed') {
         // Try to refresh JWT first
         const tryBootstrap = async () => {
@@ -1455,7 +762,8 @@
             log('bootstrap successful, starting tracking');
             updateTicketRef();
             startHeartbeat();
-
+            resetIdleTimer();
+            emitStateIfChanged(true);
           } else {
             log('bootstrap failed, will retry');
           }
@@ -1468,7 +776,8 @@
             log('refresh successful, starting tracking');
             updateTicketRef();
             startHeartbeat();
-
+            resetIdleTimer();
+            emitStateIfChanged(true);
           } else {
             log('refresh failed, trying bootstrap');
             // Fallback to bootstrap
@@ -1485,7 +794,8 @@
             log('bootstrap successful, starting tracking');
             updateTicketRef();
             startHeartbeat();
-
+            resetIdleTimer();
+            emitStateIfChanged(true);
           } else {
             log('bootstrap failed, will retry');
           }
@@ -1499,12 +809,14 @@
         setTimeout(tryBootstrap, 10000);
       }
     } else if (!state.isZendesk) {
-      // Non-Zendesk sites - track activity with new advanced system
+      // Non-Zendesk sites - track activity if we have auth OR try to get auth
       const authStatus = loadAuth();
 
       if (authStatus === true && state.jwt) {
-        log('Non-Zendesk site with valid JWT, starting advanced tracking');
+        log('Non-Zendesk site with valid JWT, starting tracking');
         startHeartbeat();
+        resetIdleTimer();
+        emitStateIfChanged(true);
       } else if (authStatus === 'refresh_needed') {
         log('Non-Zendesk site with refresh token available');
         // Try to refresh for non-Zendesk sites too
@@ -1513,16 +825,27 @@
           if (refreshed && state.jwt) {
             log('JWT refreshed successfully on non-Zendesk site');
             startHeartbeat();
+            resetIdleTimer();
+            emitStateIfChanged(true);
           } else {
-            log('Failed to refresh JWT on non-Zendesk site, starting advanced tracking');
-            startHeartbeat(); // Start advanced tracking even without auth
+            log('Failed to refresh JWT on non-Zendesk site, starting basic tracking');
+            // Even if refresh fails, start basic tracking
+            setupActivityListeners();
+            resetIdleTimer();
+            startHeartbeat(); // Start heartbeat even without auth
+            emitStateIfChanged(true, true);
           }
         };
         setTimeout(tryRefresh, 500);
       } else {
-        log('No auth available on non-Zendesk site, starting advanced tracking');
-        // Start advanced tracking immediately even without auth
-        startHeartbeat();
+        log('No auth available on non-Zendesk site, starting basic tracking');
+        // Track without auth for now - just log activity patterns
+        setupActivityListeners();
+        resetIdleTimer();
+
+        // Start tracking immediately even without auth
+        startHeartbeat(); // Start heartbeat even without auth
+        emitStateIfChanged(true, true);
 
         // Try to get auth from other tabs every 30 seconds
         const tryGetAuth = async () => {
@@ -1531,7 +854,8 @@
             const authStatus = loadAuth();
             if (authStatus === true && state.jwt) {
               log('Found auth tokens from another tab, starting full tracking');
-              startHeartbeat(); // Will use JWT now
+              startHeartbeat();
+              emitStateIfChanged(true);
             }
           }
         };
@@ -1541,6 +865,58 @@
         setTimeout(tryGetAuth, 1000); // Try once immediately
       }
     }
+
+    // Add beforeunload beacon for reliable final ping (guarded against duplicates)
+    let finalPingSent = false;
+    window.addEventListener('beforeunload', () => {
+      try {
+        if (finalPingSent) return;
+        finalPingSent = true;
+        
+        const finalPayload = {
+          ts: new Date().toISOString(),
+          state: getCurrentState(),
+          domain: location.hostname,
+          path: location.pathname,
+          title: (document.title || '').slice(0, 140),
+          ref_ticket_id: currentTicketId(),
+          tab_id: state.tabId,
+          segment_id: state.segmentId,
+          device_session_id: state.deviceSessionId,
+          jwt: state.jwt || 'no-auth',
+          kind: 'pagehide',
+          user_ip: null
+        };
+
+        // Use sendBeacon if available for reliable delivery
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon(`${CONFIG.BACKEND_URL}/activity`,
+            new Blob([JSON.stringify(finalPayload)], { type: 'application/json' }));
+        } else {
+          // Fallback to synchronous XMLHttpRequest
+          const xhr = new XMLHttpRequest();
+          xhr.open('POST', `${CONFIG.BACKEND_URL}/activity`, false);
+          xhr.setRequestHeader('Content-Type', 'application/json');
+          if (state.jwt && state.jwt !== 'no-auth') {
+            xhr.setRequestHeader('Authorization', `Bearer ${state.jwt}`);
+          }
+          xhr.send(JSON.stringify(finalPayload));
+        }
+      } catch (e) {
+        log('Error sending final ping:', e);
+      }
+    });
+
+    // Add visibility change handler for better heartbeat reliability
+    document.addEventListener('visibilitychange', () => {
+      const isVisible = !document.hidden;
+      if (isVisible && !state.hbTimer) {
+        // Restart heartbeat if it stopped while page was hidden
+        log('Page became visible, restarting heartbeat');
+        startHeartbeat();
+      }
+      emitStateIfChanged(false, !state.isZendesk);
+    });
 
     log('ready', { zendesk: state.isZendesk, authed: !!state.jwt, tab: state.tabId });
   }
@@ -1559,7 +935,6 @@
     ping: () => sendPing('manual', true),
     bootstrap: bootstrapAuth,  // Exponer bootstrap para debug
     stateInfo: () => ({
-      // Legacy info
       authed: !!state.jwt,
       jwtExpiry: state.jwtExpiry ? new Date(state.jwtExpiry).toISOString() : null,
       refreshExpiry: state.refreshExpiry ? new Date(state.refreshExpiry).toISOString() : null,
@@ -1573,47 +948,14 @@
       lastTicketId: state.lastTicketId,
       lastTicketExpiry: state.lastTicketExpiry ? new Date(state.lastTicketExpiry).toISOString() : null,
       heartbeatActive: !!state.hbTimer,
+      lastHeartbeatDomain: state.lastHeartbeatDomain,
       visibility: state.isVisible,
       focus: state.hasFocus,
-      lastSentState: state.lastSentState,
-      // Advanced sessionization info
-      deviceSessionId: state.deviceSessionId,
-      userId: state.userId,
-      userIP: state.userIP,
-      currentSegment: state.currentSegment ? {
-        segment_id: state.currentSegment.segment_id,
-        context: state.currentSegment.key.context,
-        attention: state.currentSegment.key.attention,
-        site: state.currentSegment.key.site,
-        bg: state.currentSegment.key.bg,
-        startAt: new Date(state.currentSegment.startAt).toISOString(),
-        endAt: new Date(state.currentSegment.endAt).toISOString(),
-        duration_min: Math.round((state.currentSegment.endAt - state.currentSegment.startAt) / 60000)
-      } : null,
-      bufferCount: Object.keys(state.buffer.items || {}).length,
-      focusStable: state.focusStable,
-      urlStable: state.urlStable,
-      lastInputAt: new Date(state.lastInputAt).toISOString(),
-      advancedTracking: true
+      lastSentState: state.lastSentState
     }),
     forceSync: () => {
       log('Manual token sync triggered');
       syncTokensFromStorage();
-    },
-    testAgentDetection: () => {
-      const agent = detectZendeskAgent();
-      if (agent) {
-        const userId = mapAgentToUserId(agent);
-        console.log('✅ Agent Detection Test:', {
-          detected: agent,
-          mappedUserId: userId,
-          bufferCount: Object.keys(state.buffer.items || {}).length
-        });
-        return { agent, userId, bufferCount: Object.keys(state.buffer.items || {}).length };
-      } else {
-        console.log('❌ Agent Detection Test: No agent detected');
-        return { agent: null, userId: null };
-      }
     },
     testPing: async () => {
       const testPayload = {
