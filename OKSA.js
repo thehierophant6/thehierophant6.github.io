@@ -101,7 +101,9 @@
           screen.width + 'x' + screen.height,
           new Date().getTimezoneOffset()
         ].join('|');
-        sessionId = 'ds_' + btoa(fingerprint).slice(0, 32) + '_' + Date.now().toString(36);
+        // Use consistent hash without timestamp for stability
+        const hash = btoa(fingerprint).slice(0, 32);
+        sessionId = 'ds_' + hash;
         lsSet('device_session_id', sessionId);
         log('Generated new device session ID:', sessionId);
       } else {
