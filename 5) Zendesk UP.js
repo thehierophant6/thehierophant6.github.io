@@ -209,11 +209,69 @@
       /* use <template> to avoid DOM re-serialisation, then inject in slices < 15 kB */
       const temp = document.createElement('template');
       temp.innerHTML = fullMessage.trim();
-  
+
       const html = temp.innerHTML;
       const sliceSize = 15000;                                    // Zendesk keeps everything ≤ 20 kB per op.
-      for (let pos = 0; pos < html.length; pos += sliceSize) {
-        document.execCommand('insertHTML', false, html.slice(pos, pos + sliceSize));
+
+      // Function to split HTML safely without breaking tags
+      function splitHTMLSafely(htmlContent, maxSize) {
+        const chunks = [];
+        let currentChunk = '';
+        let i = 0;
+
+        while (i < htmlContent.length) {
+          const remaining = htmlContent.length - i;
+          if (remaining <= maxSize) {
+            // Add remaining content
+            chunks.push(htmlContent.slice(i));
+            break;
+          }
+
+          // Find a safe break point
+          let breakPoint = i + maxSize;
+
+          // Look backwards for a complete tag or safe break point
+          let safeBreakPoint = breakPoint;
+          for (let j = breakPoint; j > i && j > breakPoint - 500; j--) {
+            const char = htmlContent[j];
+            const prevChar = htmlContent[j - 1];
+
+            // Prefer breaking after complete tags
+            if (char === '>' && (prevChar === '/' || htmlContent[j - 2] === '<')) {
+              safeBreakPoint = j + 1;
+              break;
+            }
+
+            // Break after closing tags
+            if (char === '>' && prevChar !== '/' && htmlContent[j - 2] !== '<') {
+              safeBreakPoint = j + 1;
+              break;
+            }
+
+            // Safe break points: after spaces, periods, or line breaks
+            if (char === ' ' || char === '.' || char === '\n' || char === '\r') {
+              safeBreakPoint = j;
+              break;
+            }
+          }
+
+          // Extract chunk
+          const chunk = htmlContent.slice(i, safeBreakPoint);
+          if (chunk.trim()) {
+            chunks.push(chunk);
+          }
+
+          i = safeBreakPoint;
+        }
+
+        return chunks;
+      }
+
+      const chunks = splitHTMLSafely(html, sliceSize);
+      for (const chunk of chunks) {
+        if (chunk.trim()) {
+          document.execCommand('insertHTML', false, chunk);
+        }
       }
     } else {
       /* untouched plain-text path */
@@ -389,13 +447,17 @@
     // Helper function to process the content with better formatting
     function processContent(content) {
       let formattedContent = content;
-      
+
+      // Convert <strong> tags to HTML bold formatting
+      formattedContent = formattedContent.replace(/<strong>/g, '<strong style="font-weight:bold;">');
+      formattedContent = formattedContent.replace(/<\/strong>/g, '</strong>');
+
       // Format numbered headers (1. Title)
-      formattedContent = formattedContent.replace(/(\d+\.\s*)([^\n]+)/g, 
+      formattedContent = formattedContent.replace(/(\d+\.\s*)([^\n]+)/g,
         '<h3 style="margin:25px 0 15px;color:#3855e5;font-size:16px;font-weight:bold;border-bottom:1px solid #eee;padding-bottom:8px;">$1$2</h3>');
-      
+
       // Format bullet points with arrows
-      formattedContent = formattedContent.replace(/->\s+([^\n]+)/g, 
+      formattedContent = formattedContent.replace(/->\s+([^\n]+)/g,
         '<li style="margin-bottom:12px;position:relative;list-style-type:none;padding-left:5px;">• $1</li>');
       
       // Wrap lists in styled <ul> tags
